@@ -232,6 +232,7 @@ int main(void) {
     assert(!strcmp(result_value("product", v2, sizeof v2), "value-of-ro.build.product"));
     assert(!strcmp(result_value("svc", v2, sizeof v2), "00000000"));
     assert(!strcmp(result_value("user", v2, sizeof v2), "255,68,35,2,1"));
+    assert(!strcmp(result_value("b_ceil", v2, sizeof v2), "12,15"));
     /* drive-mode colour is switched off for the test and comes back */
     lamp_test("ok", "3/3", "3/3", 1, 1, "2");
     /* the failures the reports describe */
@@ -509,20 +510,41 @@ int main(void) {
         load_config("/nonexistent");
         C.dry = 1; C.debug = 0; rate = 48000;
 
-        /* 1. Beat wheel stepping: coprime steps visit >=20 distinct saturated colours on both Kia and Hyundai without pastel washout */
+        /* 1. Strict HSV >=78% vivid colour filter, Beat wheel stepping, and #RRGGBB cross-palette vivid snapping */
+        set_palette("hyundai");
+        for (int i = 16; i <= 21; i++) assert(!wheel_saturated(i));   /* salmon / flesh pinks excluded */
+        for (int i = 27; i <= 41; i++) assert(!wheel_saturated(i));   /* pale peach / tan / cream / mint excluded */
+        set_palette("kia");
+        for (int i = 28; i <= 49; i++) assert(!wheel_saturated(i));   /* pale straw / pea-soup / white excluded */
+
         const char *pals[2] = {"kia", "hyundai"};
         int steps[2] = {19, 23};
         for (int p = 0; p < 2; p++) {
             set_palette(pals[p]);
             for (int si = 0; si < 2; si++) {
                 int seen_col[64] = {0}, idx = 22, uniq = 0;
-                for (int k = 0; k < 40; k++) {
+                for (int k = 0; k < 45; k++) {
                     idx = wheel_next(idx, steps[si]);
                     assert(wheel_saturated(idx));
                     if (!seen_col[idx]) { seen_col[idx] = 1; uniq++; }
                 }
-                assert(uniq >= 20);
+                assert(uniq >= 35);
             }
+        }
+        /* #RRGGBB bands snap to vivid swatches on Kia AND re-snap cleanly when switching to Hyundai */
+        set_palette("kia");
+        C.nbands = parse_bands(DEFAULT_BANDS, C.bands);
+        assert(C.nbands == 5);
+        for (int i = 0; i < C.nbands; i++) {
+            assert(palette_has_rgb(KIA_R, KIA_G, KIA_B, C.bands[i].r, C.bands[i].g, C.bands[i].b));
+            int wi = nearest_vivid_wheel(C.bands[i].r, C.bands[i].g, C.bands[i].b);
+            assert(WHEEL_R[wi] == C.bands[i].r && WHEEL_G[wi] == C.bands[i].g && WHEEL_B[wi] == C.bands[i].b);
+        }
+        set_palette("hyundai");
+        for (int i = 0; i < C.nbands; i++) {
+            assert(palette_has_rgb(HYUNDAI_R, HYUNDAI_G, HYUNDAI_B, C.bands[i].r, C.bands[i].g, C.bands[i].b));
+            int wi = nearest_vivid_wheel(C.bands[i].r, C.bands[i].g, C.bands[i].b);
+            assert(WHEEL_R[wi] == C.bands[i].r && WHEEL_G[wi] == C.bands[i].g && WHEEL_B[wi] == C.bands[i].b);
         }
         set_palette("kia");
 
@@ -572,7 +594,7 @@ int main(void) {
         drive(&d, &a, fb, 1075);
         assert(d.sent_level == 0);       /* flash expired: snaps straight to blackout (UI 0 -> raw 1) */
 
-        /* 4. Pulse mode: holds peak 10 for PULSE_HOLD_MS, ignores non-rising steady bass, plunges to bright_min between beats */
+        /* 4. Pulse mode: holds peak 10 for PULSE_HOLD_MS (105 ms), ignores non-rising steady bass, plunges to bright_min between beats */
         snprintf(C.mode, sizeof C.mode, "pulse");
         C.pulse_color = -1; C.pulse_decay = 35; C.bright_min = 1; C.bright_max = 10; C.min_interval_ms = 30;
         memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
@@ -580,9 +602,9 @@ int main(void) {
         drive(&d, &a, fb, 2000);
         assert(d.sent_level == 10);
         fb.beat = 0; fb.onset_ratio = 0; /* steady bass between beats produces onset_ratio == 0 */
-        drive(&d, &a, fb, 2040);
-        assert(d.sent_level == 10);      /* held through PULSE_HOLD_MS (55 ms) */
-        for (long long tp2 = 2060; tp2 <= 2380; tp2 += 11) drive(&d, &a, fb, tp2);
+        drive(&d, &a, fb, 2090);
+        assert(d.sent_level == 10);      /* held through PULSE_HOLD_MS (105 ms) so car LIN lamp completes fade-up ramp */
+        for (long long tp2 = 2110; tp2 <= 2420; tp2 += 11) drive(&d, &a, fb, tp2);
         assert(d.sent_level == 1);       /* reaches floor well before next 120 BPM beat at 2500 ms */
 
         /* 5. Spectrum auto-adaptation: a quieter treble entry wins when it surges above its own baseline, while manual mode stays on bass */
@@ -609,6 +631,86 @@ int main(void) {
         }
         assert(static_band == 0);   /* manual boost 1:1 stays pinned on louder 90 Hz bass */
         assert(dyn_band == 1);      /* spectrum_dynamic=1 switches cleanly to the newly-entering 3 kHz lead */
+
+        /* 6. Real-time Auto-BPM detection & tempo-linked timing (90 BPM vs 140 BPM vs beatless sine) */
+        C.auto_bpm = 1; C.flash_ms = 125; C.min_beat_ms = 200; C.pulse_decay = 35;
+        Ana a90, a140, asine;
+        ana_init(&a90); ana_init(&a140); ana_init(&asine);
+        double bpms[2] = {90.0, 140.0};
+        Ana *aptrs[2] = {&a90, &a140};
+        for (int bi = 0; bi < 2; bi++) {
+            double period_s = 60.0 / bpms[bi];
+            long long sidx = 0;
+            for (int blk = 0; blk < 620; blk++) {   /* ~6.6 s */
+                long long t = blk * 1000LL * PERIOD / rate;
+                for (int i = 0; i < PERIOD; i++, sidx++) {
+                    double ts = sidx / (double)rate;
+                    double ph = fmod(ts, period_s);
+                    double sig = 0.06 * sin(2 * M_PI * 220.0 * ts) + 0.65 * sin(2 * M_PI * 68.0 * ph) * exp(-ph * 22.0);
+                    short s16 = (short)lround(sig * 20000.0);
+                    pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+                }
+                ana_block(aptrs[bi], pcm_buf, PERIOD, t);
+            }
+        }
+        assert(fabs(a90.bpm - 90.0) < 2.5 && a90.bpm_conf > 0.50);
+        assert(fabs(a140.bpm - 140.0) < 2.5 && a140.bpm_conf > 0.50);
+        assert(eff_flash_ms(&a90) > eff_flash_ms(&a140) && eff_flash_ms(&a140) >= 105);
+        assert(eff_min_beat_ms(&a90) > eff_min_beat_ms(&a140));
+        assert(eff_pulse_hold_ms(&a90) > eff_pulse_hold_ms(&a140));
+        assert(eff_pulse_decay_frac(&a90) > eff_pulse_decay_frac(&a140));
+        C.auto_bpm = 0;   /* manual timing override ignores locked BPM */
+        assert(eff_flash_ms(&a90) == 125 && eff_min_beat_ms(&a90) == 200 && eff_pulse_hold_ms(&a90) == PULSE_HOLD_MS);
+        C.auto_bpm = 1;
+        /* beatless steady tone does not hallucinate BPM */
+        sample_idx = 0;
+        for (int blk = 0; blk < 400; blk++) {
+            long long t = blk * 1000LL * PERIOD / rate;
+            for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                short s16 = (short)lround(0.25 * sin(2 * M_PI * 110.0 * sample_idx / rate) * 20000.0);
+                pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+            }
+            ana_block(&asine, pcm_buf, PERIOD, t);
+        }
+        assert(bpm_weight(&asine) == 0.0);
+
+        /* 7. USB tuning clip capture (WAV + CSV + session.txt) & analyze_file() WAV round-trip */
+        usb_roots[0] = usb; usb_any_folder = 1;
+        tune.in_pcm = 1;
+        snprintf(dpath, sizeof dpath, "%s/diag/request", lamp_dir);
+        write_file(dpath, "capture 1\n");
+        assert(diag_poll() == 0);   /* starts capture in-place without interrupting PCM loop */
+        assert(tune.active == 1);
+        char saved_dir[340]; snprintf(saved_dir, sizeof saved_dir, "%s", tune.dir);
+        ana_init(&a); memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 22;
+        sample_idx = 0;
+        int ncap_blks = 0;
+        while (tune.active && ncap_blks < 200) {
+            long long t = ncap_blks * 1000LL * PERIOD / rate;
+            for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                double ts = sample_idx / (double)rate, ph = fmod(ts, 0.5);
+                short s16 = (short)lround((0.1 * sin(2 * M_PI * 440.0 * ts) + 0.5 * sin(2 * M_PI * 70.0 * ph) * exp(-ph * 20.0)) * 18000.0);
+                pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+            }
+            tune_write_pcm(pcm_buf, PERIOD);
+            Frame fc = ana_block(&a, pcm_buf, PERIOD, t);
+            drive(&d, &a, fc, t);
+            tune_write_frame(t, &a, &fc, &d);
+            ncap_blks++;
+        }
+        assert(tune.active == 0 && ncap_blks == 94);   /* 94 * 512 = 48,128 frames (>= 1.0 s at 48 kHz) */
+        tune.in_pcm = 0;
+        char wpath[400], cpath[400], spath2[400], ts_path[400];
+        snprintf(wpath, sizeof wpath, "%s/capture.wav", saved_dir);
+        snprintf(cpath, sizeof cpath, "%s/frames.csv", saved_dir);
+        snprintf(spath2, sizeof spath2, "%s/session.txt", saved_dir);
+        snprintf(ts_path, sizeof ts_path, "%s/tune_status", rep);
+        struct stat wst, cst, sst, tst;
+        assert(!stat(wpath, &wst) && wst.st_size == 44 + 94 * PERIOD * CH * (long)sizeof(short));
+        assert(!stat(cpath, &cst) && cst.st_size > 1000);
+        assert(!stat(spath2, &sst) && sst.st_size > 200);
+        assert(!stat(ts_path, &tst) && tst.st_size > 10);
+        assert(analyze_file(wpath) == 0);              /* --analyze parses the captured RIFF/WAVE file directly */
     }
 
     char rm[120]; snprintf(rm, sizeof rm, "rm -rf %s", lamp_dir); assert(!system(rm));

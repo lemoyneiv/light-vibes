@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
 
     private static int[] WHEEL_R = KIA_R, WHEEL_G = KIA_G, WHEEL_B = KIA_B;
 
-    private static final String DEFAULT_BANDS = "30-150:22:1 150-500:28:2 500-2000:44:4 2000-6000:56:10 6000-16000:8:30";
+    private static final String DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FAC3:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
     private static final String[] BUILT_IN = {"lively", "intense", "marigold", "contrast", "pulse3", "glow", "epic", "speed", "power", "efficiency"};
     private static final String FIRST_RUN_PRESET = "b:lively";
     private static final int MAX_BANDS = 8;      // what fits on screen; lightvibesd takes up to 12
@@ -76,6 +76,9 @@ public class MainActivity extends Activity {
     private static int tab = TAB_COLOR;   // static: kept when Android restarts the activity for day/night    // the open tab under the mode row, the same for every mode
     private int speedEnd;          // the speed, power or efficiency page's selected end: 0 low, 1 high
     private TextView speedNow;
+    private TextView tuneButton, tuneStatus;
+    private boolean tuneActive;
+    private long tuneRequestedAt;
     private ReportPage reportPage;  // on screen instead of the editor while set
     private FeedbackPage feedbackPage;  // likewise
 
@@ -105,12 +108,20 @@ public class MainActivity extends Activity {
             return lo + "-" + hi + ":" + colour + (boost != null ? ":" + boost : "");
         }
 
-        int rgb() {
+        int wheelIndex() {
             if (colour.startsWith("#")) {
-                try { return 0xFF000000 | Integer.parseInt(colour.substring(1), 16); }
-                catch (NumberFormatException e) { return Color.GRAY; }
+                try {
+                    int hex = Integer.parseInt(colour.substring(1), 16);
+                    return nearestVividWheel((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
+                } catch (NumberFormatException e) {
+                    return 0;
+                }
             }
-            return wheelColour(intOf(colour, 0));
+            return Math.max(0, Math.min(63, intOf(colour, 0)));
+        }
+
+        int rgb() {
+            return wheelColour(wheelIndex());
         }
 
         String title() {
@@ -136,6 +147,24 @@ public class MainActivity extends Activity {
     private static int readableOn(int c) {
         double y = 0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c);
         return y > 150 ? Color.BLACK : Color.WHITE;
+    }
+
+    private static boolean vividWheel(int i) {
+        if (i < 0 || i > 63) return false;
+        int mx = Math.max(WHEEL_R[i], Math.max(WHEEL_G[i], WHEEL_B[i]));
+        int mn = Math.min(WHEEL_R[i], Math.min(WHEEL_G[i], WHEEL_B[i]));
+        return mx > 0 && (mx - mn) * 100 >= 78 * mx;
+    }
+
+    private static int nearestVividWheel(int r, int g, int b) {
+        int best = 0, bestD = Integer.MAX_VALUE;
+        for (int i = 0; i < 64; i++) {
+            if (!vividWheel(i)) continue;
+            int dr = WHEEL_R[i] - r, dg = WHEEL_G[i] - g, db = WHEEL_B[i] - b;
+            int d = dr * dr + dg * dg + db * db;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
     }
 
     private static int wheelColour(int i) {
@@ -649,6 +678,8 @@ public class MainActivity extends Activity {
     private void refreshEditor() {
         editor.removeAllViews();
         editorTop.removeAllViews();
+        tuneButton = null;
+        tuneStatus = null;
         if (reportPage != null || feedbackPage != null) {
             speedNow = null;
             editor.addView(reportPage != null ? reportPage : feedbackPage);
@@ -918,7 +949,7 @@ public class MainActivity extends Activity {
         editor.addView(new View(this), new LinearLayout.LayoutParams(1, dp(10)));   // the same gap as the other Color tabs
         addBandChips(bands, 26, true);
 
-        addPalette(bands.isEmpty() ? -1 : intOf(bands.get(selectedBand).colour, -1), new ColourPick() {
+        addPalette(bands.isEmpty() ? -1 : bands.get(selectedBand).wheelIndex(), new ColourPick() {
             @Override public void pick(int idx) {
                 if (bands.isEmpty()) return;
                 bands.get(selectedBand).colour = String.valueOf(idx);
@@ -937,6 +968,7 @@ public class MainActivity extends Activity {
     }
 
     private void addPalette(final int current, final ColourPick listener, int swatchDp, int topDp) {
+        boolean dimPale = Gauge.of(mode()) == null;
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         grid.setPadding(0, dp(topDp), 0, 0);
@@ -946,6 +978,7 @@ public class MainActivity extends Activity {
                 final int idx = r * 16 + c;
                 View v = new View(this);
                 v.setBackgroundDrawable(rounded(wheelColour(idx), TEXT, idx == current ? 3 : 0, 5));
+                if (dimPale && !vividWheel(idx) && idx != current) v.setAlpha(0.32f);
                 v.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View view) { listener.pick(idx); }
                 });
@@ -996,7 +1029,7 @@ public class MainActivity extends Activity {
         n.lo = String.valueOf(mid);
         n.hi = b.hi;
         n.boost = b.boost;
-        n.colour = String.valueOf(unusedColour(bands, intOf(b.colour, 0)));
+        n.colour = String.valueOf(unusedColour(bands, b.wheelIndex()));
         b.hi = n.lo;
         bands.add(selectedBand + 1, n);
         selectedBand++;
@@ -1004,13 +1037,13 @@ public class MainActivity extends Activity {
         refreshEditor();
     }
 
-    /** Eight steps round the wheel from the starting colour, avoiding its white stretch and colours in use. */
+    /** Steps round the wheel from the starting colour, choosing only vivid unused swatches. */
     private static int unusedColour(List<Band> bands, int from) {
         for (int k = 1; k < 64; k++) {
-            int c = (from + k * 8) % 64;
-            if (c >= 32 && c <= 38) continue;
+            int c = (from + k * 9) % 64;
+            if (!vividWheel(c)) continue;
             boolean used = false;
-            for (Band b : bands) if (intOf(b.colour, -1) == c) used = true;
+            for (Band b : bands) if (b.wheelIndex() == c) used = true;
             if (!used) return c;
         }
         return from;
@@ -1477,15 +1510,25 @@ public class MainActivity extends Activity {
 
     /** The meter only reads from lightvibesd while the Response page is on screen. */
     private void syncMeter() {
+        handler.removeCallbacks(tunePoll);
         if (resumed && (tab == TAB_TUNING || Gauge.of(mode()) != null)) {
             if (meterThread == null) {
                 meterThread = new Thread(meterReader, "meter");
                 meterThread.start();
             }
+            if (tab == TAB_TUNING && Gauge.of(mode()) == null) handler.postDelayed(tunePoll, 800);
         } else {
             meterThread = null;    // meterReader sees this at its next line or timeout, and stops
         }
     }
+
+    private final Runnable tunePoll = new Runnable() {
+        @Override public void run() {
+            if (!resumed || tab != TAB_TUNING || tuneButton == null) return;
+            refreshTuneStatusFromDisk();
+            handler.postDelayed(this, 800);
+        }
+    };
 
     private final Runnable meterReader = new Runnable() {
         @Override public void run() {
@@ -1502,6 +1545,7 @@ public class MainActivity extends Activity {
                         handler.post(new Runnable() {     // not meter.post: it never runs while the meter isn't on screen
                             @Override public void run() {
                                 if (l.startsWith("speed ") || l.startsWith("power ") || l.startsWith("eff ")) showGauge(l);
+                                else if (l.startsWith("cap ")) applyTuneStatus(l.substring(4));
                                 else meter.update(l);
                             }
                         });
@@ -1546,11 +1590,72 @@ public class MainActivity extends Activity {
             tiles.add(slider("Shortest beat gap", "Ignores beats closer together", "min_beat_ms", 200, 60, 1000, 10, " ms"));
             tiles.add(slider("Beat average", "Shorter adapts to build-ups faster", "beat_avg_ms", 1500, 200, 5000, 100, " ms"));
             if (pulse) tiles.add(slider("Glow", "Higher fades more slowly", "pulse_decay", 35, 0, 99, 1, "%"));
-            else if (flashing()) tiles.add(slider("Flash length", "How long each flash holds", "flash_ms", 90, 30, 1000, 10, " ms"));
+            else if (flashing()) tiles.add(slider("Flash length", "How long each flash holds", "flash_ms", 120, 30, 1000, 10, " ms"));
             tiles.add(beatRange());
             addSection("Beat detection");
+            boolean autoBpm = !"0".equals(cfg.get("auto_bpm"));
+            addRadios(2300, new String[][] {{"1", "Auto BPM (tempo sync)"}, {"0", "Manual timing"}}, autoBpm ? "1" : "0", "auto_bpm");
             addGrid(tiles);
         }
+
+        addTuneCapture();
+    }
+
+    private void addTuneCapture() {
+        addSection("Tuning capture");
+        LinearLayout row = new LinearLayout(this);
+        row.setBaselineAligned(false);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(10));
+        tuneButton = button("Record 20s clip to USB", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                File diag = new File(getFilesDir(), "diag");
+                diag.mkdirs();
+                tuneRequestedAt = System.currentTimeMillis();
+                if (tuneActive) {
+                    writeFile(new File(diag, "request"), "capture stop");
+                    applyTuneStatus("stopped Stopping recording...");
+                } else {
+                    writeFile(new File(diag, "request"), "capture 20");
+                    applyTuneStatus("wait Starting 20s USB recording...");
+                }
+            }
+        });
+        tuneButton.setPadding(dp(16), 0, dp(16), 0);
+        row.addView(tuneButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)));
+        tuneStatus = text("Saves 20s loopback WAV + 10 ms frame CSV + settings to USB", 14, MUTED);
+        tuneStatus.setPadding(dp(14), 0, 0, 0);
+        row.addView(tuneStatus, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        editor.addView(row);
+        refreshTuneStatusFromDisk();
+        handler.removeCallbacks(tunePoll);
+        handler.postDelayed(tunePoll, 800);
+    }
+
+    private void refreshTuneStatusFromDisk() {
+        File f = new File("/data/hmgapi/public/light-vibes/tune_status");
+        if (!f.exists()) return;
+        String line = readFirstLine(f);
+        if (line == null || line.isEmpty()) return;
+        boolean fresh = (System.currentTimeMillis() - f.lastModified() < 120000L)
+                || (tuneRequestedAt > 0 && f.lastModified() >= tuneRequestedAt - 2000L)
+                || line.startsWith("rec ") || line.startsWith("wait ");
+        if (fresh) applyTuneStatus(line);
+    }
+
+    private void applyTuneStatus(String s) {
+        if (tuneButton == null || tuneStatus == null || s == null) return;
+        int sp = s.indexOf(' ');
+        String state = sp > 0 ? s.substring(0, sp) : s;
+        String msg = sp > 0 ? s.substring(sp + 1) : s;
+        boolean activeNow = "rec".equals(state) || "wait".equals(state);
+        tuneActive = activeNow;
+        tuneButton.setText(activeNow ? ("rec".equals(state) ? "Stop recording" : "Cancel") : "Record 20s clip to USB");
+        tuneButton.setTextColor(activeNow ? ON_TEXT : TEXT);
+        tuneButton.setBackgroundDrawable(rounded(activeNow ? CARD_ON : CARD, 0, 0, 8));
+        tuneButton.setPadding(dp(16), 0, dp(16), 0);
+        tuneStatus.setText(msg);
+        tuneStatus.setTextColor("error".equals(state) ? TEXT : (activeNow || "done".equals(state)) ? ACCENT : MUTED);
     }
 
     private void addGrid(List<View> tiles) {

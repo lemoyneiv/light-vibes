@@ -30,7 +30,7 @@ final class MeterView extends View {
     private String[] names = new String[0];
     private int marginPercent, sensitivity, rangeDb;
 
-    private float db, avgDb, beatPeak, heldPeak;
+    private float db, avgDb, beatPeak, heldPeak, bpm, bpmConf;
     private float[] bandDb = new float[0];
     private int selected = -1;
     private long lastData, lastBeat, heldAt;
@@ -59,7 +59,7 @@ final class MeterView extends View {
         invalidate();
     }
 
-    /** db average_db beat_peak beats selected_band nbands band_db... */
+    /** db average_db beat_peak beats selected_band nbands band_db... [bpm bpm_conf tune_rem_s] */
     void update(String line) {
         String[] p = line.trim().split(" ");
         if (p.length < 6) return;
@@ -74,6 +74,13 @@ final class MeterView extends View {
             float[] levels = new float[n];
             for (int i = 0; i < n; i++) levels[i] = Float.parseFloat(p[6 + i]);
             bandDb = levels;
+            if (p.length >= 6 + n + 2) {
+                bpm = Float.parseFloat(p[6 + n]);
+                bpmConf = Float.parseFloat(p[6 + n + 1]);
+            } else {
+                bpm = 0;
+                bpmConf = 0;
+            }
             long now = SystemClock.uptimeMillis();
             lastData = now;
             if (beats > 0) lastBeat = now;
@@ -179,7 +186,8 @@ final class MeterView extends View {
 
     private void drawBeat(Canvas c, float l, float t, float r, float b, boolean live, long now) {
         float maxPct = Math.max(400, sensitivity * 1.5f);
-        float y0 = rowBar(c, l, t, r, b, "Beat peak", live ? Math.round(heldPeak * 100) + "%" : "");
+        String val = live ? (bpmConf >= 0.30f && bpm >= 50f ? Math.round(bpm) + " BPM · " : "") + Math.round(heldPeak * 100) + "%" : "";
+        float y0 = rowBar(c, l, t, r, b, "Beat peak", val);
         float x0 = l, x1 = r - dp(22);
         paint.setColor(TRACK);
         rect.set(x0, y0, x1, b - dp(4));

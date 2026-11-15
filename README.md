@@ -75,9 +75,11 @@ The app follows the head unit's light and dark themes.
   loudness** or with a crisp **Flash on beat**. **Fixed level** keeps one brightness. **Dimmed in Dark**
   is the car's own setting, on every mode.
 - **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
-  **Manual only** band sensitivity in Spectrum, and how beats are detected. The live meter at the top
-  shows each band's level, what a band or beat has to reach (the marker lines), and where the brightness
-  sits in its range.
+  **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** for beat
+  flash and Pulse hold/decay, and **Record 20s clip to USB** (`Light Vibes tuning/`) for offline tuning.
+  Music modes automatically snap and filter colours to rich, high-saturation factory swatches. The live
+  meter at the top shows each band's level, the locked BPM, what a band or beat has to reach (the marker
+  lines), and where the brightness sits in its range.
 
 ### Driving modes
 
@@ -170,7 +172,8 @@ in a `Light Vibes reports` folder that you can attach. Over ADB it's at `/data/h
 - **Audio tap.** CarPlay and the head unit's own audio play out on ALSA `card0` device 2 (`I2S_3`),
   at 48 kHz and 44.1 kHz. The I2S controller's mixer switch `Device2 Tx to Rx Internal Loopback Mode`
   copies the outgoing audio into the same link's capture side, `pcmC0D2c`. The service switches it
-  on and reads it. What you hear is unchanged, and nothing is recorded or saved.
+  on and reads it. What you hear is unchanged, and nothing is recorded or saved unless you tap
+  **Record 20s clip to USB** on the Tuning tab.
 - **Hands off Siri and calls.** They record from `pcmC0D0c` and switch the playback side to a lower
   rate. The service lets go of `pcmC0D2c` within about 80 ms when the playback side isn't running at
   44.1 or 48 kHz.
