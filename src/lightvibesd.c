@@ -56,7 +56,7 @@
 #include <pthread.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.6.2"
+#define VERSION "0.6.3"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
@@ -194,12 +194,12 @@ static const char *detect_palette(void) {
     }
     return "kia";
 }
-static int wheel_saturated(int i) {   /* HSV saturation >= 78%: skips washed-out pinks, tans, creams, and pale greens */
-    int mx = WHEEL_R[i] > WHEEL_G[i] ? WHEEL_R[i] : WHEEL_G[i];
-    if (WHEEL_B[i] > mx) mx = WHEEL_B[i];
-    int mn = WHEEL_R[i] < WHEEL_G[i] ? WHEEL_R[i] : WHEEL_G[i];
-    if (WHEEL_B[i] < mn) mn = WHEEL_B[i];
-    return mx > 0 && (mx - mn) * 100 >= 78 * mx;
+static int wheel_saturated(int i) {   /* >=78% sat, or >=52% on green-dominant swatches so factory greens stay vivid */
+    int r = WHEEL_R[i], g = WHEEL_G[i], b = WHEEL_B[i];
+    int mx = r > g ? r : g; if (b > mx) mx = b;
+    int mn = r < g ? r : g; if (b < mn) mn = b;
+    int min_sat = (g >= r && g >= b && g - r >= 55) ? 52 : 78;
+    return mx > 0 && (mx - mn) * 100 >= min_sat * mx;
 }
 static int nearest_vivid_wheel(int r, int g, int b) {
     int best = 0, best_d = 1000000000;
@@ -240,7 +240,7 @@ static int palette_has_rgb(const unsigned char *r_tab, const unsigned char *g_ta
 
 
 /* bands: "lo-hi:colour:boost ..." e.g. "40-150:22:1 150-500:#FF3C0F:2" (wheel index 0-63 or #RRGGBB snapped to active vivid wheel) */
-static const char *DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FAC3:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
+static const char *DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FF40:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
 static int parse_bands(const char *txt, Band *out) {
     int n = 0; const char *p = txt;
     while (*p && n < MAXBANDS) {
@@ -1005,17 +1005,19 @@ static int music_rate(void) {
 
 /* ---------- FFT, real-time BPM & transient analysis ---------- */
 #define NWIN 1024                /* right-aligned 21.3 ms Hann window zero-padded into 2048-pt FFT: halves spectral lag */
-#define BPM_HIST 576             /* ~6.1 s onset history at 48 kHz (10.7 ms blocks) for comb autocorrelation */
+#define BPM_HIST 640             /* ~6.8-7.4 s multi-band onset history for comb autocorrelation */
 typedef struct {
     float ring[NFFT]; int filled;
     float win[NWIN], re[NFFT], im[NFFT];
     double bp_hp_x1, bp_hp_y1;   /* causal time-domain beat bandpass: zero window lag on drum transients */
     double bp_lp1, bp_lp2;
-    double beat_prev, beat_env, beat_fast, beat_slow, beat_ref_floor, last_eb;
+    double beat_prev, beat_env, beat_fast, beat_slow, beat_ref_floor, beat_density, last_eb;
     int beat_armed;
+    double bpm_prev_log[3];      /* log-energy history across kick (40-160), snare/body (160-900), snap/hat (900-6500) */
+    int bpm_warmup;
     float flux_hist[BPM_HIST];
     int flux_pos, flux_filled, bpm_tick;
-    double flux_mean, bpm, bpm_conf;
+    double flux_mean, flux_lp, bpm, bpm_conf;
     long long bpm_anchor_ms;
     double band_e[MAXBANDS], band_ref[MAXBANDS], band_score[MAXBANDS];
     double loud_ref_db;
@@ -1039,7 +1041,7 @@ static void ana_init(Ana *a) {
     a->rep_ref = 50;
 }
 
-/* Autocorrelation comb filter over ~6 s of compressed beat-band onset flux (65..174 BPM). */
+/* Autocorrelation comb filter over ~7 s of 3-band pulse-smoothed log-spectral onset flux (65..174 BPM). */
 static void ana_update_bpm(Ana *a) {
     int N = a->flux_filled;
     if (N < 260) return;
@@ -1052,7 +1054,7 @@ static void ana_update_bpm(Ana *a) {
     mean /= N;
     double r0 = 0;
     for (int i = 0; i < N; i++) { x[i] -= (float)mean; r0 += (double)x[i] * x[i]; }
-    if (r0 / N < 6e-4) {
+    if (r0 / N < 8e-4) {
         a->bpm_conf *= 0.85;
         if (a->bpm_conf < 0.08) { a->bpm_conf = 0; a->bpm = 0; }
         return;
@@ -1062,7 +1064,7 @@ static void ana_update_bpm(Ana *a) {
     if (lag_lo < 8) lag_lo = 8;
     if (lag_hi > N / 2 - 2) lag_hi = N / 2 - 2;
     if (lag_hi <= lag_lo + 2) return;
-    int max_lag = 2 * lag_hi + 1;
+    int max_lag = 3 * lag_hi + 1;
     if (max_lag > N - 16) max_lag = N - 16;
 
     double r[BPM_HIST], score[BPM_HIST];
@@ -1074,16 +1076,29 @@ static void ana_update_bpm(Ana *a) {
     }
     int best_L = lag_lo;
     for (int L = lag_lo - 1; L <= lag_hi + 1 && L <= max_lag; L++) {
-        double c2 = (2 * L <= max_lag && r[2 * L] > 0) ? 0.45 * r[2 * L] : 0.0;
+        double c2 = (2 * L <= max_lag && r[2 * L] > 0) ? 0.42 * r[2 * L] : 0.0;
+        double c3 = (3 * L <= max_lag && r[3 * L] > 0) ? 0.18 * r[3 * L] : 0.0;
         double cand = 60000.0 / (L * BLOCK_MS);
-        double lp = log2(cand / 120.0) / 0.60;
-        double prior = 0.85 + 0.15 * exp(-0.5 * lp * lp);
-        if (a->bpm_conf >= 0.35 && a->bpm > 50.0 && fabs(cand - a->bpm) < 5.0) prior *= 1.06;
-        score[L] = (r[L] + c2) * prior;
+        double lp = log2(cand / 120.0) / 0.58;
+        double prior = 0.84 + 0.16 * exp(-0.5 * lp * lp);
+        if (a->bpm_conf >= 0.35 && a->bpm > 50.0 && fabs(cand - a->bpm) < 5.0) prior *= 1.08;
+        score[L] = (r[L] + c2 + c3) * prior;
         if (L >= lag_lo && L <= lag_hi && score[L] > score[best_L]) best_L = L;
     }
+    /* subharmonic guard: if 1:2 octave or 2:3 dotted-quarter lands in 96..160 BPM and is nearly as strong, prefer primary grid */
+    static const int sh_num[2] = {1, 2}, sh_den[2] = {2, 3};
+    for (int si = 0; si < 2; si++) {
+        int sub_L = (int)lround((double)best_L * sh_num[si] / sh_den[si]);
+        if (sub_L >= lag_lo && sub_L <= lag_hi) {
+            double cand_fast = 60000.0 / (sub_L * BLOCK_MS);
+            if (cand_fast >= 96.0 && cand_fast <= 160.0 && r[sub_L] >= 0.16 && score[sub_L] >= 0.84 * score[best_L]) {
+                best_L = sub_L;
+                break;
+            }
+        }
+    }
     double raw_pk = r[best_L] + ((2 * best_L <= max_lag && r[2 * best_L] > 0) ? 0.35 * r[2 * best_L] : 0.0);
-    if (r[best_L] < 0.18 || raw_pk < 0.24) {
+    if (r[best_L] < 0.16 || raw_pk < 0.22) {
         a->bpm_conf *= 0.82;
         if (a->bpm_conf < 0.08) { a->bpm_conf = 0; a->bpm = 0; }
         return;
@@ -1097,7 +1112,7 @@ static void ana_update_bpm(Ana *a) {
         if (delta > 0.5) delta = 0.5;
     }
     double est_bpm = 60000.0 / ((best_L + delta) * BLOCK_MS);
-    double conf = (raw_pk - 0.18) / 0.52;
+    double conf = (raw_pk - 0.14) / 0.40;
     if (conf < 0) conf = 0;
     if (conf > 1) conf = 1;
     if (a->bpm <= 0 || a->bpm_conf < 0.20 || fabs(est_bpm - a->bpm) > 12.0) a->bpm = est_bpm;
@@ -1106,8 +1121,8 @@ static void ana_update_bpm(Ana *a) {
 }
 
 static double bpm_weight(const Ana *a) {
-    if (!C.auto_bpm || a->bpm < 55.0 || a->bpm_conf < 0.30) return 0.0;
-    double w = (a->bpm_conf - 0.30) / 0.35;
+    if (!C.auto_bpm || a->bpm < 55.0 || a->bpm_conf < 0.28) return 0.0;
+    double w = (a->bpm_conf - 0.28) / 0.35;
     return w > 1.0 ? 1.0 : w;
 }
 static int eff_min_beat_ms(const Ana *a) {
@@ -1115,17 +1130,18 @@ static int eff_min_beat_ms(const Ana *a) {
     if (w <= 0.0) return C.min_beat_ms;
     double T = 60000.0 / a->bpm;
     double tgt = C.min_beat_ms * (T / 500.0);
-    if (tgt < 110.0) tgt = 110.0;
-    if (tgt > 380.0) tgt = 380.0;
+    if (tgt < 0.56 * T) tgt = 0.56 * T;   /* suppress weak eighth-note double-triggers between beats */
+    if (tgt < 185.0) tgt = 185.0;
+    if (tgt > 400.0) tgt = 400.0;
     return (int)lround((1.0 - w) * C.min_beat_ms + w * tgt);
 }
 static double eff_ref_tau_ms(const Ana *a) {
     double w = bpm_weight(a);
-    if (w <= 0.0) return 145.0;
-    double tgt = 145.0 * (60000.0 / a->bpm / 500.0);
-    if (tgt < 95.0) tgt = 95.0;
-    if (tgt > 220.0) tgt = 220.0;
-    return (1.0 - w) * 145.0 + w * tgt;
+    if (w <= 0.0) return 160.0;
+    double tgt = 160.0 * (60000.0 / a->bpm / 500.0);
+    if (tgt < 105.0) tgt = 105.0;
+    if (tgt > 240.0) tgt = 240.0;
+    return (1.0 - w) * 160.0 + w * tgt;
 }
 static int eff_flash_ms(const Ana *a) {
     if (C.flash_ms <= 0) return 0;
@@ -1133,9 +1149,9 @@ static int eff_flash_ms(const Ana *a) {
     if (w <= 0.0) return C.flash_ms;
     double T = 60000.0 / a->bpm;
     double tgt = C.flash_ms * (T / 500.0);
-    if (tgt > 0.42 * T) tgt = 0.42 * T;
-    if (tgt < 105.0) tgt = 105.0;   /* car LIN lamp fade-up ramp needs >=105 ms to reach 100% PWM output */
-    if (tgt > 200.0) tgt = 200.0;
+    if (tgt > 0.34 * T) tgt = 0.34 * T;   /* leave >=66% dark valley between quarter-note flashes */
+    if (tgt < 105.0) tgt = 105.0;         /* car LIN lamp fade-up ramp needs >=105 ms to reach 100% PWM output */
+    if (tgt > 175.0) tgt = 175.0;
     return (int)lround((1.0 - w) * C.flash_ms + w * tgt);
 }
 #define PULSE_HOLD_MS 105
@@ -1227,18 +1243,27 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     double flux = eb > a->beat_prev ? eb - a->beat_prev : 0.0;
     a->beat_prev = eb;
 
-    /* feed onset flux into the BPM comb autocorrelation ring (deadzoning <16% steady-wave phase ripple) */
+    /* 3-band Hann-windowed log-spectral onset flux (kick 40-160, snare/body 160-900, snap/hat 900-6500) + ~20 ms pulse smooth */
+    double bpm_es[3] = { band_energy(a->re, a->im, 40, 160), band_energy(a->re, a->im, 160, 900), band_energy(a->re, a->im, 900, 6500) };
+    static const double bpm_wts[3] = { 0.42, 0.33, 0.25 }, bpm_floors[3] = { 1e-7, 1e-8, 1e-9 };
+    double raw_on = 0;
+    for (int k = 0; k < 3; k++) {
+        double lg = log(bpm_es[k] + bpm_floors[k]);
+        double dl = a->bpm_warmup >= 3 ? lg - a->bpm_prev_log[k] : 0.0;
+        a->bpm_prev_log[k] = lg;
+        if (dl > 0.06) raw_on += bpm_wts[k] * (dl - 0.06);   /* sidelobe-immune per-band deadzone */
+    }
+    if (a->bpm_warmup < 4) a->bpm_warmup++;
     if (f.db > C.silence_db) {
-        double eff_flux = flux > 0.16 * eb ? flux - 0.16 * eb : 0.0;
-        double ref = a->beat_slow > 1e-12 ? a->beat_slow : (eb > 1e-12 ? eb : 1e-12);
-        double raw_on = log1p(eff_flux / ref);
-        a->flux_mean += (BLOCK_MS / (BLOCK_MS + 240.0)) * (raw_on - a->flux_mean);
-        double on = raw_on - a->flux_mean;
-        a->flux_hist[a->flux_pos] = (float)(on > 0 ? on : 0);
+        a->flux_mean += (BLOCK_MS / (BLOCK_MS + 220.0)) * (raw_on - a->flux_mean);
+        double on = raw_on > a->flux_mean ? raw_on - a->flux_mean : 0.0;
+        a->flux_lp += (BLOCK_MS / (BLOCK_MS + 15.0)) * (on - a->flux_lp);   /* ~20 ms pulse kernel tolerates human micro-timing */
+        a->flux_hist[a->flux_pos] = (float)a->flux_lp;
         a->flux_pos = (a->flux_pos + 1) % BPM_HIST;
         if (a->flux_filled < BPM_HIST) a->flux_filled++;
         if (++a->bpm_tick >= 24 && a->flux_filled >= 260) { a->bpm_tick = 0; ana_update_bpm(a); }
     } else {
+        a->flux_lp *= 0.5;
         a->flux_hist[a->flux_pos] = 0.0f;
         a->flux_pos = (a->flux_pos + 1) % BPM_HIST;
         if (a->flux_filled < BPM_HIST) a->flux_filled++;
@@ -1248,15 +1273,16 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
 
     double accent = eb + 0.65 * flux;   /* sharp percussive attacks punch cleanly above sustained sub-bass */
     a->beat_fast = accent > a->beat_fast ? accent : 0.45 * a->beat_fast + 0.55 * eb;
-    if (t - a->last_beat < 40) {
-        if (0.45 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.45 * eb;
+    a->beat_density *= exp(-BLOCK_MS / 2400.0);
+    if (t - a->last_beat < 45) {
+        if (0.50 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.50 * eb;
     } else {
         a->beat_ref_floor *= exp(-BLOCK_MS / eff_ref_tau_ms(a));
     }
     double alpha_slow = BLOCK_MS / (double)C.beat_avg_ms;
     if (t < 1500) alpha_slow = alpha_slow * 4 > 0.5 ? 0.5 : alpha_slow * 4;   /* settle fast at start */
     if (a->beat_slow <= 0) a->beat_slow = eb > 1e-12 ? eb : 1e-12;
-    if (eb <= 1.15 * a->beat_slow || (env_prev > 0 && eb > 1.65 * env_prev && flux > 0.35 * eb)) a->beat_armed = 1;
+    if (eb <= 1.12 * a->beat_slow || (env_prev > 0 && eb > 1.70 * env_prev && flux > 0.38 * eb)) a->beat_armed = 1;
     int rising = env_prev <= 1e-14 || eb > 1.18 * env_prev;
     f.beat_ratio = a->beat_slow > 1e-14 ? a->beat_fast / a->beat_slow : 0;
     f.onset_ratio = (a->beat_slow > 1e-14 && eb > env_prev && accent > a->beat_ref_floor) ? (eb + 1.2 * flux) / a->beat_slow : 0;
@@ -1266,13 +1292,19 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     if (bw > 0.0 && a->bpm_anchor_ms >= 0 && t > a->bpm_anchor_ms) {
         double T = 60000.0 / a->bpm;
         double cyc = fmod((double)(t - a->bpm_anchor_ms), T) / T;
-        eff_sens = 100.0 + (C.sensitivity - 100.0) * (1.0 - 0.14 * bw * cos(2.0 * M_PI * cyc));
+        eff_sens = 100.0 + (C.sensitivity - 100.0) * (1.0 - 0.15 * bw * cos(2.0 * M_PI * cyc));
         if (eff_sens < 105.0) eff_sens = 105.0;
     }
+    /* adaptive beat-density governor: keep firing rate near the primary beat grid so dark valleys stay crisp */
+    double tgt_bps = (bw > 0.30 && a->bpm > 55.0) ? (a->bpm / 60.0) * 1.08 : 2.05;
+    double excess_bps = (a->beat_density / 2.4) - tgt_bps;
+    if (excess_bps > 0.0) eff_sens *= (1.0 + 0.50 * excess_bps);
+
     if (f.db > C.silence_db && a->beat_armed && rising && accent > a->beat_ref_floor
         && f.beat_ratio * 100 > eff_sens && t - a->last_beat >= eff_min_beat_ms(a)) {
         f.beat = 1; a->last_beat = t; a->bpm_anchor_ms = t; a->beat_armed = 0;
-        if (0.45 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.45 * eb;
+        a->beat_density += 1.0;
+        if (0.50 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.50 * eb;
     }
     double eb_capped = eb > 4.0 * a->beat_slow ? 4.0 * a->beat_slow : eb;
     a->beat_slow += alpha_slow * (eb_capped - a->beat_slow);
@@ -1684,9 +1716,13 @@ static void diag_run(void) {
     take_over_lamp();
     check_due = 0;                      /* this test is the check */
 
-    static const int colours[] = {22, 44, 0};   /* red, green, blue */
+    int colours[3] = {
+        nearest_vivid_wheel(255, 0, 20),
+        nearest_vivid_wheel(0, 255, 64),
+        nearest_vivid_wheel(20, 30, 255)
+    };
     static const char *colour_steps[] = {"red", "green", "blue"};
-    int cn = (int)(sizeof colours / sizeof colours[0]), c_ok = 0, c_answers = 0;
+    int cn = 3, c_ok = 0, c_answers = 0;
     for (int i = 0; i < cn && !stop_flag; i++) {
         int w = colours[i];
         diag_flush(colour_steps[i]);
@@ -1725,6 +1761,22 @@ static void diag_run(void) {
         say("lamp test: ceiling probe raw 12 -> %d, raw 15 -> %d", ceil12, ceil15);
     }
     dkv("b_ceil", "%d,%d", ceil12, ceil15);
+    int gp[4] = {-1, -1, -1, -1};
+    if (reply && !stop_flag) {   /* probe whether MICOM accepts pure green or 0x01 theme-channel rich green */
+        static const int grgb[4][3] = {
+            {0, 255, 0}, {104, 221, 98}, {0x0100, 0x01FF, 0x0100}, {0x0118, 0x01FD, 0x0140}
+        };
+        for (int gi = 0; gi < 4 && !stop_flag; gi++) {
+            light_rgb(grgb[gi][0], grgb[gi][1], grgb[gi][2], 1);
+            usleep((diag_hold_ms < 200 ? diag_hold_ms : 200) * 1000);
+            if (read_lamp(l) && lamp_fresh) {
+                gp[gi] = (l[0] == grgb[gi][0] && l[1] == grgb[gi][1] && l[2] == grgb[gi][2]) ? 1 : 0;
+                say("lamp test: green probe [%d] (0x%x,0x%x,0x%x) -> (0x%x,0x%x,0x%x) ok=%d",
+                    gi, grgb[gi][0], grgb[gi][1], grgb[gi][2], l[0], l[1], l[2], gp[gi]);
+            }
+        }
+    }
+    dkv("g_probe", "%d,%d,%d,%d", gp[0], gp[1], gp[2], gp[3]);
     diag_flush("restoring");
 
     int had_base = base.valid, want[5] = {base.r, base.g, base.b, base.bright_raw, base.drive_mode};
@@ -1735,7 +1787,8 @@ static void diag_run(void) {
     dkv("restored", "%d", restored);
     base.valid = 0;
     last_rgb[0] = last_rgb[1] = last_rgb[2] = -1; last_raw = -1;
-    say("lamp test done: replies %d, colours %d/%d, brightness %d/%d (ceil %d,%d), restored %d", reply, c_ok, cn, b_ok, bn, ceil12, ceil15, restored);
+    say("lamp test done: replies %d, colours %d/%d, brightness %d/%d (ceil %d,%d, g_probe %d,%d,%d,%d), restored %d",
+        reply, c_ok, cn, b_ok, bn, ceil12, ceil15, gp[0], gp[1], gp[2], gp[3], restored);
     diag_flush("done");
 }
 static int write_report(const char *path, const char *colour, const char *bright) {
@@ -1762,15 +1815,39 @@ static const char *find_stick(void) {
     return NULL;
 }
 
-/* ---------- 20-second live USB tuning recorder (WAV loopback + 10.7 ms telemetry CSV + session snapshot) ---------- */
+/* ---------- 20-second zero-jitter RAM-buffered USB tuning recorder (flushed to USB only after capture ends) ---------- */
 static struct {
-    FILE *wav, *csv;
-    char wav_buf[65536], csv_buf[65536];
+    short *pcm_mem;
+    char *csv_mem;
+    size_t csv_len, csv_cap;
+    char sess_hdr[1536];
     char dir[340], rel[160];
     int req_sec, active, in_pcm, pcm_rate, last_rem;
-    long long target_frames, written_frames, csv_rows;
+    long long target_frames, pcm_cap_frames, written_frames, csv_rows;
 } tune;
 
+static void tune_free_mem(void) {
+    free(tune.pcm_mem); tune.pcm_mem = NULL;
+    free(tune.csv_mem); tune.csv_mem = NULL;
+    tune.csv_len = tune.csv_cap = 0;
+}
+static void tune_csv_append(const char *fmt, ...) {
+    if (!tune.csv_mem) return;
+    if (tune.csv_len + 512 > tune.csv_cap) {
+        size_t ncap = tune.csv_cap * 2;
+        char *nb = realloc(tune.csv_mem, ncap);
+        if (!nb) return;
+        tune.csv_mem = nb;
+        tune.csv_cap = ncap;
+    }
+    va_list ap; va_start(ap, fmt);
+    int n = vsnprintf(tune.csv_mem + tune.csv_len, tune.csv_cap - tune.csv_len, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        size_t avail = tune.csv_cap - 1 - tune.csv_len;
+        tune.csv_len += (size_t)n < avail ? (size_t)n : avail;
+    }
+}
 static int tune_rem_sec(void) {
     if (!tune.active || tune.pcm_rate <= 0) return tune.req_sec > 0 ? tune.req_sec : 0;
     long long left = tune.target_frames - tune.written_frames;
@@ -1805,33 +1882,43 @@ static void wav_header(unsigned char h[44], int srate, unsigned int data_bytes) 
 }
 static void tune_finish(const char *reason) {
     if (!tune.active) {
+        tune_free_mem();
         if (tune.req_sec > 0) { tune.req_sec = 0; tune_publish("idle", "Recording cancelled"); }
         return;
     }
+    tune.active = 0;
+    tune.req_sec = 0;
     unsigned int data_bytes = (unsigned int)(tune.written_frames * CH * sizeof(short));
-    if (tune.wav) {
-        fflush(tune.wav);
-        if (fseek(tune.wav, 0, SEEK_SET) == 0) {
-            unsigned char hdr[44];
-            wav_header(hdr, tune.pcm_rate, data_bytes);
-            fwrite(hdr, 1, sizeof hdr, tune.wav);
-        }
-        fflush(tune.wav);
-        fsync(fileno(tune.wav));
-        fclose(tune.wav);
-        tune.wav = NULL;
-    }
-    if (tune.csv) {
-        fflush(tune.csv);
-        fsync(fileno(tune.csv));
-        fclose(tune.csv);
-        tune.csv = NULL;
-    }
-    char sp[400];
+    char wp[400], cp[400], sp[400];
+    snprintf(wp, sizeof wp, "%s/capture.wav", tune.dir);
+    snprintf(cp, sizeof cp, "%s/frames.csv", tune.dir);
     snprintf(sp, sizeof sp, "%s/session.txt", tune.dir);
-    FILE *sf = fopen(sp, "a");
+    int ok = 1;
+    FILE *wf = fopen(wp, "wb");
+    if (wf && tune.pcm_mem) {
+        unsigned char hdr[44];
+        wav_header(hdr, tune.pcm_rate, data_bytes);
+        if (fwrite(hdr, 1, sizeof hdr, wf) != sizeof hdr) ok = 0;
+        if (data_bytes > 0 && fwrite(tune.pcm_mem, 1, data_bytes, wf) != data_bytes) ok = 0;
+        if (fflush(wf) || fsync(fileno(wf))) ok = 0;
+        fclose(wf);
+    } else {
+        if (wf) fclose(wf);
+        ok = 0;
+    }
+    FILE *cf = fopen(cp, "wb");
+    if (cf && tune.csv_mem) {
+        if (tune.csv_len > 0 && fwrite(tune.csv_mem, 1, tune.csv_len, cf) != tune.csv_len) ok = 0;
+        if (fflush(cf) || fsync(fileno(cf))) ok = 0;
+        fclose(cf);
+    } else {
+        if (cf) fclose(cf);
+        ok = 0;
+    }
+    FILE *sf = fopen(sp, "w");
     if (sf) {
         long long dur_ms = tune.pcm_rate > 0 ? tune.written_frames * 1000LL / tune.pcm_rate : 0;
+        fputs(tune.sess_hdr, sf);
         fprintf(sf, "captured_ms=%lld\ncaptured_frames=%lld\ncsv_rows=%lld\nfinish_reason=%s\n\n--- recent log ---\n",
                 dur_ms, tune.written_frames, tune.csv_rows, reason);
         log_tail(sf, 120, NULL);
@@ -1839,10 +1926,14 @@ static void tune_finish(const char *reason) {
         fsync(fileno(sf));
         fclose(sf);
     }
+    tune_free_mem();
     sync();
     double secs = tune.pcm_rate > 0 ? (double)tune.written_frames / tune.pcm_rate : 0.0;
-    tune.active = 0;
-    tune.req_sec = 0;
+    if (!ok) {
+        say("tuning capture write failed in %s", tune.dir);
+        tune_publish("error", "Failed writing tuning clip to USB drive");
+        return;
+    }
     char msg[240];
     snprintf(msg, sizeof msg, "Saved %.1fs to USB: %s", secs, tune.rel);
     say("tuning capture finished (%s): %.1fs -> %s", reason, secs, tune.dir);
@@ -1864,67 +1955,77 @@ static void tune_start(int srate) {
     strftime(stamp_str, sizeof stamp_str, "tune-%Y%m%d-%H%M%S", &tm);
     snprintf(tune.rel, sizeof tune.rel, "Light Vibes tuning/%s", stamp_str);
     snprintf(tune.dir, sizeof tune.dir, "%s/%s", root, stamp_str);
-    for (int suffix = 2; mkdir(tune.dir, 0777) != 0 && errno == EEXIST && suffix < 20; suffix++) {
+    int dir_ok = (mkdir(tune.dir, 0777) == 0);
+    for (int suffix = 2; !dir_ok && errno == EEXIST && suffix < 20; suffix++) {
         snprintf(tune.rel, sizeof tune.rel, "Light Vibes tuning/%s-%d", stamp_str, suffix);
         snprintf(tune.dir, sizeof tune.dir, "%s/%s-%d", root, stamp_str, suffix);
+        dir_ok = (mkdir(tune.dir, 0777) == 0);
     }
-    char wp[400], cp[400], sp[400];
-    snprintf(wp, sizeof wp, "%s/capture.wav", tune.dir);
-    snprintf(cp, sizeof cp, "%s/frames.csv", tune.dir);
-    snprintf(sp, sizeof sp, "%s/session.txt", tune.dir);
-    tune.wav = fopen(wp, "wb");
-    tune.csv = fopen(cp, "w");
-    if (!tune.wav || !tune.csv) {
-        if (tune.wav) { fclose(tune.wav); tune.wav = NULL; }
-        if (tune.csv) { fclose(tune.csv); tune.csv = NULL; }
+    if (!dir_ok) {
         tune.req_sec = 0;
-        tune_publish("error", "Could not create tuning files on USB drive");
-        say("tuning capture open failed in %s: %s", tune.dir, strerror(errno));
+        tune_publish("error", "Could not create tuning folder on USB drive");
+        say("tuning capture mkdir failed in %s: %s", tune.dir, strerror(errno));
         return;
     }
-    setvbuf(tune.wav, tune.wav_buf, _IOFBF, sizeof tune.wav_buf);
-    setvbuf(tune.csv, tune.csv_buf, _IOFBF, sizeof tune.csv_buf);
-    unsigned char hdr[44];
-    wav_header(hdr, srate, 0);
-    fwrite(hdr, 1, sizeof hdr, tune.wav);
-    fprintf(tune.csv, "t_ms,db,avg_db,bpm,bpm_conf,eff_flash_ms,eff_min_beat_ms,beat_eb,beat_slow,beat_ref_floor,beat_ratio,onset_ratio,beat_armed,beat,sel_band,want_r,want_g,want_b,want_level,sent_level,b0_db,b1_db,b2_db,b3_db,b4_db,b5_db\n");
+    tune_free_mem();
+    tune.target_frames = (long long)srate * tune.req_sec;
+    tune.pcm_cap_frames = tune.target_frames + 16LL * PERIOD;
+    tune.pcm_mem = malloc((size_t)tune.pcm_cap_frames * CH * sizeof(short));
+    tune.csv_cap = (size_t)tune.req_sec * 24000U + 65536U;
+    tune.csv_mem = malloc(tune.csv_cap);
+    tune.csv_len = 0;
+    if (!tune.pcm_mem || !tune.csv_mem) {
+        tune_free_mem();
+        tune.req_sec = 0;
+        tune_publish("error", "Not enough memory for tuning capture");
+        say("tuning capture malloc failed for %ds", tune.req_sec);
+        return;
+    }
+    tune_csv_append("t_ms,db,avg_db,bpm,bpm_conf,eff_flash_ms,eff_min_beat_ms,beat_eb,beat_slow,beat_ref_floor,beat_ratio,onset_ratio,beat_armed,beat,sel_band,want_r,want_g,want_b,want_level,sent_level,b0_db,b1_db,b2_db,b3_db,b4_db,b5_db,beat_density\n");
 
-    FILE *sf = fopen(sp, "w");
-    if (sf) {
-        char prod[96], pname[96];
-        char *a1[] = {(char *)getprop_bin, "ro.build.product", NULL};
-        char *a2[] = {(char *)getprop_bin, "ro.product.name", NULL};
-        first_line_of(a1, prod, sizeof prod);
-        first_line_of(a2, pname, sizeof pname);
-        fprintf(sf, "Light Vibes tuning capture\nversion=%s\ntimestamp=%s\nsample_rate=%d\n", VERSION, stamp_str, srate);
-        fprintf(sf, "product=%s\nname=%s\npalette=%s (setting=%s)\n", prod[0] ? prod : "?", pname[0] ? pname : "?", active_palette, C.palette);
-        fprintf(sf, "mode=%s\npreset=%s\nbrightness=%d..%d (fixed=%d, curve=%s, range_db=%d, dim=%d)\n",
-                C.mode, C.preset, C.bright_min, C.bright_max, C.bright_fixed, C.bright_curve, C.loudness_range_db, C.gauge_dim);
-        fprintf(sf, "auto_bpm=%d\nsensitivity=%d\nbeat_hz=%d-%d\nbeat_avg_ms=%d\nmin_beat_ms=%d\n",
-                C.auto_bpm, C.sensitivity, C.beat_low_hz, C.beat_high_hz, C.beat_avg_ms, C.min_beat_ms);
-        fprintf(sf, "flash_enabled=%d\nflash_ms=%d\nbeat_step=%d\nskip_white=%d\npulse_decay=%d\npulse_color=%d\n",
-                flash_enabled(), C.flash_ms, C.beat_step, C.skip_white, C.pulse_decay, C.pulse_color);
-        fprintf(sf, "spectrum_dynamic=%d\nswitch_margin=%d\nband_smoothing_ms=%d\nbands=%s\n",
-                C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text);
-        fprintf(sf, "min_interval_ms=%d\nsilence_db=%d\n", C.min_interval_ms, C.silence_db);
-        if (base.valid) fprintf(sf, "user_light=%d,%d,%d,raw=%d,dm=%d,dim=%d\n", base.r, base.g, base.b, base.bright_raw, base.drive_mode, base.dim);
-        fclose(sf);
+    char prod[96], pname[96];
+    char *a1[] = {(char *)getprop_bin, "ro.build.product", NULL};
+    char *a2[] = {(char *)getprop_bin, "ro.product.name", NULL};
+    first_line_of(a1, prod, sizeof prod);
+    first_line_of(a2, pname, sizeof pname);
+    int hn = snprintf(tune.sess_hdr, sizeof tune.sess_hdr,
+        "Light Vibes tuning capture\nversion=%s\ntimestamp=%s\nsample_rate=%d\n"
+        "product=%s\nname=%s\npalette=%s (setting=%s)\n"
+        "mode=%s\npreset=%s\nbrightness=%d..%d (fixed=%d, curve=%s, range_db=%d, dim=%d)\n"
+        "auto_bpm=%d\nsensitivity=%d\nbeat_hz=%d-%d\nbeat_avg_ms=%d\nmin_beat_ms=%d\n"
+        "flash_enabled=%d\nflash_ms=%d\nbeat_step=%d\nskip_white=%d\npulse_decay=%d\npulse_color=%d\n"
+        "spectrum_dynamic=%d\nswitch_margin=%d\nband_smoothing_ms=%d\nbands=%s\n"
+        "min_interval_ms=%d\nsilence_db=%d\n",
+        VERSION, stamp_str, srate,
+        prod[0] ? prod : "?", pname[0] ? pname : "?", active_palette, C.palette,
+        C.mode, C.preset, C.bright_min, C.bright_max, C.bright_fixed, C.bright_curve, C.loudness_range_db, C.gauge_dim,
+        C.auto_bpm, C.sensitivity, C.beat_low_hz, C.beat_high_hz, C.beat_avg_ms, C.min_beat_ms,
+        flash_enabled(), C.flash_ms, C.beat_step, C.skip_white, C.pulse_decay, C.pulse_color,
+        C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
+        C.min_interval_ms, C.silence_db);
+    if (base.valid && hn > 0 && hn < (int)sizeof tune.sess_hdr - 80) {
+        snprintf(tune.sess_hdr + hn, sizeof tune.sess_hdr - (size_t)hn,
+                 "user_light=%d,%d,%d,raw=%d,dm=%d,dim=%d\n",
+                 base.r, base.g, base.b, base.bright_raw, base.drive_mode, base.dim);
     }
     tune.active = 1;
     tune.pcm_rate = srate;
-    tune.target_frames = (long long)srate * tune.req_sec;
     tune.written_frames = 0;
     tune.csv_rows = 0;
     tune.last_rem = tune.req_sec;
     char msg[128];
     snprintf(msg, sizeof msg, "Recording to USB: %ds left...", tune.req_sec);
-    say("tuning capture started: %ds at %d Hz -> %s", tune.req_sec, srate, tune.dir);
+    say("tuning capture started (RAM-buffered): %ds at %d Hz -> %s", tune.req_sec, srate, tune.dir);
     tune_publish("rec", msg);
 }
 static void tune_write_pcm(const short *pcm_samples, int frames) {
-    if (!tune.active || !tune.wav) return;
-    size_t got = fwrite(pcm_samples, sizeof(short) * CH, (size_t)frames, tune.wav);
-    tune.written_frames += (long long)got;
+    if (!tune.active || !tune.pcm_mem || frames <= 0) return;
+    long long space = tune.pcm_cap_frames - tune.written_frames;
+    int n = (long long)frames < space ? frames : (int)space;
+    if (n > 0) {
+        memcpy(tune.pcm_mem + tune.written_frames * (long long)CH, pcm_samples, (size_t)n * CH * sizeof(short));
+        tune.written_frames += n;
+    }
     int rem = tune_rem_sec();
     if (rem > 0 && rem != tune.last_rem) {
         tune.last_rem = rem;
@@ -1934,13 +2035,13 @@ static void tune_write_pcm(const short *pcm_samples, int frames) {
     }
 }
 static void tune_write_frame(long long t, const Ana *a, const Frame *f, const Drv *d) {
-    if (!tune.active || !tune.csv) return;
-    fprintf(tune.csv, "%lld,%.1f,%.1f,%.1f,%.2f,%d,%d,%.3e,%.3e,%.3e,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%d",
+    if (!tune.active || !tune.csv_mem) return;
+    tune_csv_append("%lld,%.1f,%.1f,%.1f,%.2f,%d,%d,%.3e,%.3e,%.3e,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%d",
             t, f->db, a->loud_ref_db, a->bpm, a->bpm_conf, eff_flash_ms(a), eff_min_beat_ms(a),
             a->last_eb, a->beat_slow, a->beat_ref_floor, f->beat_ratio, f->onset_ratio,
             a->beat_armed, f->beat, f->band, d->want_r, d->want_g, d->want_b, d->want_level, d->sent_level);
-    for (int i = 0; i < 6; i++) fprintf(tune.csv, ",%.1f", i < C.nbands ? f->band_db[i] : -140.0);
-    fputc('\n', tune.csv);
+    for (int i = 0; i < 6; i++) tune_csv_append(",%.1f", i < C.nbands ? f->band_db[i] : -140.0);
+    tune_csv_append(",%.3f\n", a->beat_density);
     tune.csv_rows++;
     if (tune.written_frames >= tune.target_frames) tune_finish("complete");
 }
@@ -2428,7 +2529,7 @@ static int analyze_file(const char *path) {
     }
     Ana a; ana_init(&a); Drv d; memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 22;
     Meter m; memset(&m, 0, sizeof m);
-    short buf[PERIOD * CH]; long long nblk = 0, t = 0; int beats = 0;
+    short buf[PERIOD * CH]; long long nblk = 0, active_blks = 0, peak_blks = 0, t = 0; int beats = 0;
     show_config();
     while (fread(buf, sizeof(short) * CH, PERIOD, f) == PERIOD) {
         t = nblk * 1000LL * PERIOD / rate;
@@ -2436,12 +2537,19 @@ static int analyze_file(const char *path) {
         if (fr.beat) { beats++; if (C.debug >= 1) say("t=%6lld ms BEAT ratio=%.2f", t, fr.beat_ratio); }
         meter(&m, &a, fr, t);
         drive(&d, &a, fr, t);
+        if (fr.db > C.silence_db) {
+            active_blks++;
+            if (d.want_level >= C.bright_max) peak_blks++;
+        }
         nblk++;
     }
     t = nblk * 1000LL * PERIOD / rate;
     fclose(f);
-    if (a.bpm_conf >= 0.30 && a.bpm > 50.0) say("analyzed %lld ms (%d Hz), %d beats, %.1f BPM (conf %.0f%%)", t, rate, beats, a.bpm, a.bpm_conf * 100);
-    else say("analyzed %lld ms (%d Hz), %d beats", t, rate, beats);
+    double duty = active_blks > 0 ? 100.0 * (double)peak_blks / (double)active_blks : 0.0;
+    if (a.bpm_conf >= 0.28 && a.bpm > 50.0)
+        say("analyzed %lld ms (%d Hz), %d beats, %.1f BPM (conf %.0f%%), peak_duty=%.1f%%", t, rate, beats, a.bpm, a.bpm_conf * 100, duty);
+    else
+        say("analyzed %lld ms (%d Hz), %d beats, peak_duty=%.1f%%", t, rate, beats, duty);
     rate = prev_rate;
     return 0;
 }
@@ -2661,7 +2769,7 @@ int main(int argc, char **argv) {
                 quiet_since = -1;
                 if (sound_since < 0) sound_since = t;
                 if (!lights_active && rate != MAX_RATE && t - sound_since < SOURCE_START_MS) {
-                    if (tune.active) tune_write_frame(t, &a, &f, &d);
+                    if (tune.active) { tune_write_frame(t, &a, &f, &d); if (!tune.active) pcm_drain_backlog(pcm, buf); }
                     continue;
                 }
                 if (!lights_active) {
@@ -2683,7 +2791,7 @@ int main(int argc, char **argv) {
                     restore_base(); lights_active = 0; base.valid = 0; say("music quiet — lights back to normal");
                 }
             }
-            if (tune.active) tune_write_frame(t, &a, &f, &d);
+            if (tune.active) { tune_write_frame(t, &a, &f, &d); if (!tune.active) pcm_drain_backlog(pcm, buf); }
         }
         tune.in_pcm = 0;
         if (tune.active) tune_finish("playback_stopped");

@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
 
     private static int[] WHEEL_R = KIA_R, WHEEL_G = KIA_G, WHEEL_B = KIA_B;
 
-    private static final String DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FAC3:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
+    private static final String DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FF40:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
     private static final String[] BUILT_IN = {"lively", "intense", "marigold", "contrast", "pulse3", "glow", "epic", "speed", "power", "efficiency"};
     private static final String FIRST_RUN_PRESET = "b:lively";
     private static final int MAX_BANDS = 8;      // what fits on screen; lightvibesd takes up to 12
@@ -151,9 +151,11 @@ public class MainActivity extends Activity {
 
     private static boolean vividWheel(int i) {
         if (i < 0 || i > 63) return false;
-        int mx = Math.max(WHEEL_R[i], Math.max(WHEEL_G[i], WHEEL_B[i]));
-        int mn = Math.min(WHEEL_R[i], Math.min(WHEEL_G[i], WHEEL_B[i]));
-        return mx > 0 && (mx - mn) * 100 >= 78 * mx;
+        int r = WHEEL_R[i], g = WHEEL_G[i], b = WHEEL_B[i];
+        int mx = Math.max(r, Math.max(g, b));
+        int mn = Math.min(r, Math.min(g, b));
+        int minSat = (g >= r && g >= b && g - r >= 55) ? 52 : 78;
+        return mx > 0 && (mx - mn) * 100 >= minSat * mx;
     }
 
     private static int nearestVividWheel(int r, int g, int b) {
@@ -978,7 +980,7 @@ public class MainActivity extends Activity {
                 final int idx = r * 16 + c;
                 View v = new View(this);
                 v.setBackgroundDrawable(rounded(wheelColour(idx), TEXT, idx == current ? 3 : 0, 5));
-                if (dimPale && !vividWheel(idx) && idx != current) v.setAlpha(0.32f);
+                if (dimPale && !vividWheel(idx) && idx != current) v.setAlpha(0.55f);
                 v.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View view) { listener.pick(idx); }
                 });

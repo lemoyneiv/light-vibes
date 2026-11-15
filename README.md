@@ -75,11 +75,13 @@ The app follows the head unit's light and dark themes.
   loudness** or with a crisp **Flash on beat**. **Fixed level** keeps one brightness. **Dimmed in Dark**
   is the car's own setting, on every mode.
 - **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
-  **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** for beat
-  flash and Pulse hold/decay, and **Record 20s clip to USB** (`Light Vibes tuning/`) for offline tuning.
-  Music modes automatically snap and filter colours to rich, high-saturation factory swatches. The live
-  meter at the top shows each band's level, the locked BPM, what a band or beat has to reach (the marker
-  lines), and where the brightness sits in its range.
+  **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** (using a
+  3-band log-spectral comb tracker for beat flash, cooldown and Pulse hold/decay), and **Record 20s clip
+  to USB** (`Light Vibes tuning/`, RAM-buffered during playback for zero light jitter). Music modes
+  automatically snap and filter colours to rich, hue-aware vivid factory swatches (including Hyundai &
+  Kia greens while skipping pale pinks, tans and whites). The live meter at the top shows each band's
+  level, the locked BPM, what a band or beat has to reach (the marker lines), and where the brightness
+  sits in its range.
 
 ### Driving modes
 

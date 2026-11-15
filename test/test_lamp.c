@@ -233,6 +233,7 @@ int main(void) {
     assert(!strcmp(result_value("svc", v2, sizeof v2), "00000000"));
     assert(!strcmp(result_value("user", v2, sizeof v2), "255,68,35,2,1"));
     assert(!strcmp(result_value("b_ceil", v2, sizeof v2), "12,15"));
+    assert(!strcmp(result_value("g_probe", v2, sizeof v2), "1,1,1,1"));
     /* drive-mode colour is switched off for the test and comes back */
     lamp_test("ok", "3/3", "3/3", 1, 1, "2");
     /* the failures the reports describe */
@@ -510,12 +511,15 @@ int main(void) {
         load_config("/nonexistent");
         C.dry = 1; C.debug = 0; rate = 48000;
 
-        /* 1. Strict HSV >=78% vivid colour filter, Beat wheel stepping, and #RRGGBB cross-palette vivid snapping */
+        /* 1. Hue-aware vivid colour filter (retaining Hyundai/Kia greens while excluding pastels), Beat stepping, and #RRGGBB snapping */
         set_palette("hyundai");
         for (int i = 16; i <= 21; i++) assert(!wheel_saturated(i));   /* salmon / flesh pinks excluded */
-        for (int i = 27; i <= 41; i++) assert(!wheel_saturated(i));   /* pale peach / tan / cream / mint excluded */
+        for (int i = 27; i <= 39; i++) assert(!wheel_saturated(i));   /* pale peach / tan / cream excluded */
+        assert(wheel_saturated(40) && wheel_saturated(41));           /* Hyundai vivid greens retained */
+        assert(nearest_vivid_wheel(0, 255, 64) == 41);
         set_palette("kia");
-        for (int i = 28; i <= 49; i++) assert(!wheel_saturated(i));   /* pale straw / pea-soup / white excluded */
+        for (int i = 28; i <= 39; i++) assert(!wheel_saturated(i));   /* pale peach / straw / white excluded */
+        for (int i = 40; i <= 49; i++) assert(wheel_saturated(i));    /* Kia vivid greens retained */
 
         const char *pals[2] = {"kia", "hyundai"};
         int steps[2] = {19, 23};
@@ -673,6 +677,22 @@ int main(void) {
             ana_block(&asine, pcm_buf, PERIOD, t);
         }
         assert(bpm_weight(&asine) == 0.0);
+        /* 3-band BPM tracker locks 115 BPM snare/hi-hat transients even over a continuous 65 Hz sub-bass drone */
+        Ana asub; ana_init(&asub);
+        sample_idx = 0;
+        for (int blk = 0; blk < 680; blk++) {
+            long long t = blk * 1000LL * PERIOD / rate;
+            for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                double ts = sample_idx / (double)rate;
+                double ph = fmod(ts, 60.0 / 115.0);
+                double sig = 0.28 * sin(2 * M_PI * 65.0 * ts)
+                           + (0.42 * sin(2 * M_PI * 520.0 * ph) + 0.30 * sin(2 * M_PI * 2600.0 * ph)) * exp(-ph * 28.0);
+                short s16 = (short)lround(sig * 18000.0);
+                pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+            }
+            ana_block(&asub, pcm_buf, PERIOD, t);
+        }
+        assert(fabs(asub.bpm - 115.0) < 2.5 && asub.bpm_conf > 0.35);
 
         /* 7. USB tuning clip capture (WAV + CSV + session.txt) & analyze_file() WAV round-trip */
         usb_roots[0] = usb; usb_any_folder = 1;
