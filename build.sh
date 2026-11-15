@@ -1,12 +1,12 @@
 #!/bin/bash
-# Build the light-vibes HMG-API mod on the Mac.
+# Build the light-vibes HMG-API mod on Linux or macOS.
 #
 #   ./build.sh          ARM binaries, settings app, signed dist/ zips
 #   ./build.sh test     also build a host copy and run the analysis on synthetic music
 #
-# Needs: zig (brew install zig), git, python3, openssl, unzip, zip, a JDK, the Android SDK with build-tools
-# and platforms;android-19 (ANDROID_HOME, default: Homebrew's android-commandlinetools), and a checkout of
-# HMG-API (HMGAPI_DIR, default ../HMG-API). The test step also needs numpy.
+# Needs: zig (or pip3 install ziglang), git, python3, openssl, unzip, zip, a JDK, the Android SDK with build-tools
+# and platforms;android-19 (ANDROID_HOME, default: ~/android-sdk or Homebrew's android-commandlinetools), and a checkout of
+# HMG-API (HMGAPI_DIR, default third_party/HMG-API or ../HMG-API). The test step also needs numpy.
 # The mod is signed with ~/.hmgapi/author.key, the app with ~/.hmgapi/light-vibes-app.keystore (made on
 # first build). Keep both: updates need the same keys as the first install.
 # Output binaries are static ARMv7 (musl), so they run on the head unit's Android 4.4 without bionic.
@@ -14,7 +14,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 TINY=third_party/tinyalsa
 TINY_REV=a7cd26a17fe2add2ff38d2f281ed0b919187a068   # tinyalsa master as built and tested on the car (2026-11-01)
-SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
+if [ -n "${ANDROID_HOME:-}" ]; then SDK=$ANDROID_HOME
+elif [ -d "$HOME/android-sdk" ]; then SDK=$HOME/android-sdk
+else SDK=/opt/homebrew/share/android-commandlinetools; fi
 BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)
 ANDROID_JAR=$SDK/platforms/android-19/android.jar
 AUTHOR_KEY=${HMGAPI_KEY:-$HOME/.hmgapi/author.key}
