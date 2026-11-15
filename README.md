@@ -9,9 +9,7 @@ What's new in each version is in the [changelog](CHANGELOG.md).
 **[Download the latest release](https://github.com/dibble9012/light-vibes/releases/latest)**
 
 Supports the Kia EV6, Hyundai Ioniq 5 and Hyundai Ioniq 6 (USA Gen5W head units). Light Vibes detects
-the car and uses its own 64 factory ambient colours, which differ between Kia and Hyundai. It's been
-used most on a 2023 Kia EV6 GT-Line. This is an early version, and some parts
-haven't been tried on the car yet: see [What's been tested](#whats-been-tested).
+the car and uses its own factory ambient colours (64 custom wheel colours on Kia; 64 custom wheel colours plus all 10 official `0x01xx` mood-theme stock colours—including Healing Forest emerald green, Mindful Teal, Ocean Blue, Marigold Gold, Vivid Orchid and Dream Purple—on Hyundai).
 
 ## Install
 
@@ -23,9 +21,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.0-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.4-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.0.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.4.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -34,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.0-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.4-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -55,33 +53,52 @@ Every change applies right away.
 The app follows the head unit's light and dark themes.
 
 - **On/Off** switches the effect off without uninstalling the mod.
-- **Presets:** Lively (the default), Intense, Marigold, Contrast, Bold Flash, Glow, Epic, Speed, Power and
-  Efficiency. Tap one to use it. If you switch presets with unsaved changes, the app asks whether to
-  save them, save them as a new preset, or discard them.
+- **Presets:** Lively (the default), Intense, Marigold, Contrast, Bold Flash, Glow, Epic, Duet, Drop,
+  Synesthesia, Ember, Phrase Drift, Night Drive, Speed, Power and Efficiency. Tap one to use it. If you
+  switch presets with unsaved changes, the app asks whether to save them, save them as a new preset, or
+  discard them.
 - **Tabs:** every mode has **Color**, **Brightness** and **Tuning** tabs.
 
-### Music modes
+### Music & hybrid modes
 
 - **Spectrum** gives each sound band its own colour: tap a band, then a colour. **+** splits the
   selected band in two (up to 8 bands), and **−** removes it, with its neighbour taking over its range.
+  A 115 ms minimum dwell lets the car's LIN lamp finish each colour transition cleanly without mid-fade mud.
 - **Beat** steps around the colour wheel on each beat, by the **Color step** you choose.
 - **Pulse** pulses the brightness to the beat in one colour. The **Pulse** card shows the colour in
   use. Pick any colour, or **Drive Mode** at the bottom of the picker to use the car's drive-mode
   colours, which change live as you switch Eco, Normal and Sport. Picking Drive Mode turns on the car's
   **Link to Drive Mode** setting, and picking any other colour turns it off, so the colour shows.
   **Set as ambient light color** also makes the picked colour your car's own ambient colour.
+- **Duet** layers two musical roles onto one lamp: a smooth midrange/vocal **Melody Bed** (picked or
+  auto-drifting every 8 beats) punctuated by crisp **Beat Accent** flashes in the 180° opposite
+  complementary colour (or any picked colour).
+- **Drop** tracks macro song dynamics across breakdowns (calm cool simmer), rising build-ups (climbing
+  hue and brightness tension), and full drops (high-impact neon colour leaps with deep dark valleys),
+  with **Full Neon**, **Cool to Fire** and **Cyberpunk** palettes.
+- **Synesthesia** maps continuous log-frequency spectral centroid (55 Hz–8 kHz) directly to colour
+  hue, gliding smoothly from deep bass hues through vocal mids to bright highs, with a live **Color
+  rotation** slider.
+- **Ember** models thermal glow: each beat ignites a bright hot flare that cools through rich glowing
+  embers (**Fire**, **Plasma** or **Aurora**) as the note decays.
+- **Drift** holds curated mood colours (**Forest & Aurora**, **Cyberpunk**, **Sunset**, **Ocean Deep**
+  or **Full Wheel**) across whole musical bars (**Beats per color**, default 4) with a subtle downbeat
+  brightness swell.
+- **Night Drive** fuses EV driving telemetry with music: **Motor Power & Regen** (emerald green on
+  regen, ocean blue cruising, red under throttle) or **Vehicle Speed** sets the colour while music
+  beats pulse the brightness—and when music is paused, it cruises calmly at your telemetry colour.
 - **Brightness:** **Follow the music** sets a range (`0` to `10`, where `0` turns the lamp completely off
   between hits for full strobe contrast) that the brightness moves within, either with the **Average
   loudness** or with a crisp **Flash on beat**. **Fixed level** keeps one brightness. **Dimmed in Dark**
   is the car's own setting, on every mode.
 - **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
   **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** (using a
-  3-band log-spectral comb tracker for beat flash, cooldown and Pulse hold/decay), and **Record 20s clip
+  3-band log-spectral comb tracker with CarPlay track-skip silence reset), and **Record 20s clip
   to USB** (`Light Vibes tuning/`, RAM-buffered during playback for zero light jitter). Music modes
-  automatically snap and filter colours to rich, hue-aware vivid factory swatches (including Hyundai &
-  Kia greens while skipping pale pinks, tans and whites). The live meter at the top shows each band's
-  level, the locked BPM, what a band or beat has to reach (the marker lines), and where the brightness
-  sits in its range.
+  automatically snap and filter colours to rich, hue-aware vivid factory swatches (including Hyundai's
+  `0x01xx` stock greens/golds/teals and Kia's greens while skipping pale pinks, tans and whites).
+  The live meter at the top shows each band's level, the locked BPM, what a band or beat has to reach
+  (the marker lines), and where the brightness sits in its range.
 
 ### Driving modes
 
@@ -103,6 +120,8 @@ the slider's **Now** shows the current reading.
 - **+ New preset**, at the end of the list, starts a preset from Lively as it came. **Save** keeps
   your changes in the current preset, and **Save as…** copies them to a new one. Presets can have
   any name.
+- **Reset modified presets** appears automatically whenever any built-in preset has saved overrides,
+  restoring all built-in presets to their shipped settings in one tap.
 - **Delete** removes the current preset. For a built-in preset you've changed, the same prompt offers
   **Reset instead**. Deleted built-in presets come back with **Restore built-in presets** at the end
   of the list.

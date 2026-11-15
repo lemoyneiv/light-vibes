@@ -253,8 +253,8 @@ final class ReportPage extends LinearLayout {
         String[] p = u.split(",");
         if (p.length < 3) return 0;
         try {
-            return 0xFF000000 | Math.min(255, Integer.parseInt(p[0].trim())) << 16 | Math.min(255, Integer.parseInt(p[1].trim())) << 8
-                    | Math.min(255, Integer.parseInt(p[2].trim()));
+            return 0xFF000000 | ((Integer.parseInt(p[0].trim()) & 0xFF) << 16) | ((Integer.parseInt(p[1].trim()) & 0xFF) << 8)
+                    | (Integer.parseInt(p[2].trim()) & 0xFF);
         } catch (NumberFormatException e) {
             return 0;
         }

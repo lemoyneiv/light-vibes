@@ -56,7 +56,7 @@
 #include <pthread.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.6.3"
+#define VERSION "0.6.4"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
@@ -66,19 +66,33 @@ static int rate = MAX_RATE;   /* the capture side only runs at the rate playback
 #define BIN_HZ ((double)rate / NFFT)
 #define BLOCK_MS (1000.0 * PERIOD / rate)
 #define MAXBANDS 12
+#define MAXWHEEL 74
 
 extern char **environ;
 
-/* ---------- factory 64-colour custom wheels (Kia EV6 & Hyundai Ioniq 5 VehicleSettings) ---------- */
-static const unsigned char KIA_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
-static const unsigned char KIA_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
-static const unsigned char KIA_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
+/* ---------- factory 64-colour custom wheels + Hyundai Ioniq 5 0x01xx stock mood colours (64..73) ---------- */
+static const unsigned short KIA_R[64] = {16,16,16,33,47,64,82,100,120,136,155,169,183,193,204,213,221,228,235,239,246,250,254,255,255,255,255,255,255,255,255,255,255,255,254,255,246,233,220,202,166,168,149,132,117,104,93,81,71,62,53,44,37,30,25,20,16,16,16,16,16,16,16,16};
+static const unsigned short KIA_G[64] = {67,46,32,28,28,28,28,28,28,29,33,35,35,33,31,27,23,19,14,10,6,4,1,50,68,80,105,120,143,166,195,205,218,232,243,255,255,255,255,252,226,243,235,229,223,221,222,225,231,238,245,250,250,250,250,250,244,230,210,187,163,138,111,89};
+static const unsigned short KIA_B[64] = {244,242,239,239,239,239,239,239,239,239,239,239,234,224,210,192,174,153,153,116,96,81,69,29,35,39,48,53,62,70,88,118,158,200,230,255,246,221,188,147,91,98,98,98,98,98,105,118,133,152,169,189,207,225,237,249,252,252,252,252,252,252,252,248};
 
-static const unsigned char HYUNDAI_R[64] = {176,195,205,232,255,255,255,255,255,255,255,255,254,255,254,254,255,255,255,255,255,255,255,254,255,255,255,255,255,255,255,255,255,254,255,254,247,230,210,175,119,58,10,0,0,0,0,0,0,0,0,0,25,55,81,100,109,122,125,128,130,143,156,167};
-static const unsigned char HYUNDAI_G[64] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,107,73,88,113,125,3,34,48,60,65,137,148,160,172,177,191,207,216,237,255,254,255,254,254,255,255,217,180,161,140,125,115,99,85,62,0,0,0,0,42,52,25,0,0,0,0,0};
-static const unsigned char HYUNDAI_B[64] = {255,254,254,254,241,195,158,137,117,111,106,101,95,72,58,30,106,116,73,88,113,115,10,0,23,42,49,107,119,111,113,108,123,138,147,165,182,186,188,191,196,198,235,245,255,255,255,255,254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255};
+/* 0..63: Gen5W custom wheel; 64..73: verified Ioniq 5 0x01xx stock themes (Polar, Soft, Ice, Ocean, Teal, Emerald, Gold, Coral, Orchid, Purple) */
+static const unsigned short HYUNDAI_R[74] = {
+    176,195,205,232,255,255,255,255,255,255,255,255,254,255,254,254,255,255,255,255,255,255,255,254,255,255,255,255,255,255,255,255,255,254,255,254,247,230,210,175,119,58,10,0,0,0,0,0,0,0,0,0,25,55,81,100,109,122,125,128,130,143,156,167,
+    485,500,439,280,259,382,510,489,443,394
+};
+static const unsigned short HYUNDAI_G[74] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,107,73,88,113,125,3,34,48,60,65,137,148,160,172,177,191,207,216,237,255,254,255,254,254,255,255,217,180,161,140,125,115,99,85,62,0,0,0,0,42,52,25,0,0,0,0,0,
+    498,489,484,398,455,471,424,318,271,293
+};
+static const unsigned short HYUNDAI_B[74] = {
+    255,254,254,254,241,195,158,137,117,111,106,101,95,72,58,30,106,116,73,88,113,115,10,0,23,42,49,107,119,111,113,108,123,138,147,165,182,186,188,191,196,198,235,245,255,255,255,255,254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    506,479,508,509,448,277,273,318,492,508
+};
 
-static const unsigned char *WHEEL_R = KIA_R, *WHEEL_G = KIA_G, *WHEEL_B = KIA_B;
+static const unsigned short *WHEEL_R = KIA_R, *WHEEL_G = KIA_G, *WHEEL_B = KIA_B;
+static int wheel_n = 64;
+static int vivid_ring[MAXWHEEL], vivid_n = 0;
+static double vivid_hue[MAXWHEEL];
 static const char *active_palette = "kia";
 static const char *build_prop_path = "/system/build.prop";
 static const char *hmgapi_json_path = "/data/hmgapi/settings/hmgapi.json";
@@ -92,7 +106,7 @@ static struct {
     char dir[256];
     int enabled, debug, dry;
     char palette[16];           /* auto | kia | hyundai */
-    char mode[16];              /* beat | spectrum | pulse | speed | power | efficiency */
+    char mode[16];              /* beat | spectrum | pulse | duet | drop | synesthesia | ember | drift | nightdrive | speed | power | efficiency */
     int speed_low, speed_high, speed_color_low, speed_color_high;   /* speed mode: in speed_unit, wheel indexes */
     char speed_unit[8];         /* mph | kmh */
     int power_low, power_high, power_color_low, power_color_zero, power_color_high;   /* power mode: kW, negative = regen */
@@ -101,7 +115,7 @@ static struct {
     char eff_source[12];        /* average: the car's own average | trip: this drive, worked out here */
     char gauge_bright[8];       /* speed/power/efficiency brightness: 1-10, or own (0.8.0's "auto" = 10 with dim on) */
     int gauge_dim;              /* and the car's "dimmed in dark" with it: 1 on, 0 off */
-    int bright_fixed;           /* spectrum/beat: one level (gauge_brightness, with gauge_dim) instead of following the music */
+    int bright_fixed;           /* spectrum/beat/synesthesia/drift: one level instead of following the music */
     char preset[16];            /* standard | repo */
     char bright_curve[16];      /* range | repo */
     int min_interval_ms;        /* per command type */
@@ -116,9 +130,15 @@ static struct {
     int beat_step;              /* wheel steps per beat (beat mode) */
     int skip_white;
     int auto_bpm;               /* 1 = detect track BPM and scale flash, pulse hold/decay, and beat cooldown */
-    int pulse_decay;            /* pulse: percent of brightness kept per 100 ms */
+    int pulse_decay;            /* pulse/ember/nightdrive: percent of brightness kept per 100 ms */
     int pulse_color;            /* pulse: the wheel colour it pulses in, or -1 for the owner's own colour */
     int pulse_set_car;          /* pulse: also make pulse_color the car's ambient colour (it stays after the music) */
+    int duet_bed, duet_accent;  /* duet: melody bed colour (-1 = auto cool drift) and beat accent (-1 = auto complement) */
+    int drop_style, drop_sensitivity; /* drop: palette style (0=neon, 1=fire, 2=cyber) and drop trigger sensitivity % */
+    int syn_shift;              /* synesthesia: hue rotation in degrees (0..359) */
+    int ember_theme;            /* ember: thermal palette (0=fire, 1=plasma, 2=aurora) */
+    int drift_theme, drift_beats; /* drift: mood theme (0..4) and musical beats per colour step (2..16) */
+    char nd_source[12];         /* nightdrive: "power" (motor kW & regen) or "speed" (vehicle speed) */
     int switch_margin;          /* spectrum: percent a new band must beat the current one by */
     int band_smoothing_ms;
     int spectrum_dynamic;       /* spectrum: 1 = auto-adapt each band to its running baseline, 0 = fixed boosts only */
@@ -194,52 +214,116 @@ static const char *detect_palette(void) {
     }
     return "kia";
 }
-static int wheel_saturated(int i) {   /* >=78% sat, or >=52% on green-dominant swatches so factory greens stay vivid */
-    int r = WHEEL_R[i], g = WHEEL_G[i], b = WHEEL_B[i];
+static double rgb_hue_deg(int r, int g, int b) {
+    r &= 0xff; g &= 0xff; b &= 0xff;
     int mx = r > g ? r : g; if (b > mx) mx = b;
     int mn = r < g ? r : g; if (b < mn) mn = b;
-    int min_sat = (g >= r && g >= b && g - r >= 55) ? 52 : 78;
+    int d = mx - mn;
+    if (d <= 0) return 0.0;
+    double h;
+    if (mx == r) h = 60.0 * ((g - b) / (double)d);
+    else if (mx == g) h = 60.0 * (2.0 + (b - r) / (double)d);
+    else h = 60.0 * (4.0 + (r - g) / (double)d);
+    if (h < 0.0) h += 360.0;
+    return h;
+}
+static int wheel_saturated(int i) {   /* >=78% sat, or >=52% on true leaf greens (g-b>=75) so Kia greens stay vivid while pale mints are excluded */
+    int r = WHEEL_R[i] & 0xff, g = WHEEL_G[i] & 0xff, b = WHEEL_B[i] & 0xff;
+    int mx = r > g ? r : g; if (b > mx) mx = b;
+    int mn = r < g ? r : g; if (b < mn) mn = b;
+    int min_sat = (g >= r && g >= b && g - r >= 55 && g - b >= 75) ? 52 : 78;
     return mx > 0 && (mx - mn) * 100 >= min_sat * mx;
 }
 static int nearest_vivid_wheel(int r, int g, int b) {
+    r &= 0xff; g &= 0xff; b &= 0xff;
     int best = 0, best_d = 1000000000;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < wheel_n; i++) {
         if (!wheel_saturated(i)) continue;
-        int dr = (int)WHEEL_R[i] - r, dg = (int)WHEEL_G[i] - g, db = (int)WHEEL_B[i] - b;
+        int dr = (int)(WHEEL_R[i] & 0xff) - r, dg = (int)(WHEEL_G[i] & 0xff) - g, db = (int)(WHEEL_B[i] & 0xff) - b;
         int d = dr * dr + dg * dg + db * db;
         if (d < best_d) { best_d = d; best = i; }
+    }
+    return best;
+}
+static double wheel_hue(int idx) {
+    if (idx < 0 || idx >= wheel_n) idx = 0;
+    return rgb_hue_deg(WHEEL_R[idx], WHEEL_G[idx], WHEEL_B[idx]);
+}
+static int vivid_at_hue(double deg) {
+    if (vivid_n <= 0) return 0;
+    deg = fmod(deg, 360.0);
+    if (deg < 0.0) deg += 360.0;
+    int best = vivid_ring[0];
+    double best_d = 999.0;
+    for (int k = 0; k < vivid_n; k++) {
+        double d = fabs(vivid_hue[k] - deg);
+        if (d > 180.0) d = 360.0 - d;
+        if (d < best_d) { best_d = d; best = vivid_ring[k]; }
     }
     return best;
 }
 static void set_palette(const char *name) {
     if (!strcmp(name, "hyundai")) {
         WHEEL_R = HYUNDAI_R; WHEEL_G = HYUNDAI_G; WHEEL_B = HYUNDAI_B;
+        wheel_n = 74;
         active_palette = "hyundai";
     } else {
         WHEEL_R = KIA_R; WHEEL_G = KIA_G; WHEEL_B = KIA_B;
+        wheel_n = 64;
         active_palette = "kia";
+    }
+    vivid_n = 0;
+    for (int i = 0; i < wheel_n; i++) {
+        if (!wheel_saturated(i)) continue;
+        double h = wheel_hue(i);
+        int pos = vivid_n++;
+        while (pos > 0 && vivid_hue[pos - 1] > h) {
+            vivid_hue[pos] = vivid_hue[pos - 1];
+            vivid_ring[pos] = vivid_ring[pos - 1];
+            pos--;
+        }
+        vivid_hue[pos] = h;
+        vivid_ring[pos] = i;
     }
     for (int i = 0; i < C.nbands; i++) {
         int col = C.bands[i].color;
         if (C.bands[i].hex_rgb >= 0) {
             int hx = C.bands[i].hex_rgb;
             col = nearest_vivid_wheel((hx >> 16) & 255, (hx >> 8) & 255, hx & 255);
+        } else if (col >= wheel_n) {
+            col = nearest_vivid_wheel(HYUNDAI_R[col], HYUNDAI_G[col], HYUNDAI_B[col]);
         }
-        if (col >= 0 && col < 64) {
+        if (col >= 0 && col < wheel_n) {
             C.bands[i].r = WHEEL_R[col];
             C.bands[i].g = WHEEL_G[col];
             C.bands[i].b = WHEEL_B[col];
         }
     }
 }
-static int palette_has_rgb(const unsigned char *r_tab, const unsigned char *g_tab, const unsigned char *b_tab, int r, int g, int b) {
-    for (int i = 0; i < 64; i++)
+static int palette_has_rgb(const unsigned short *r_tab, const unsigned short *g_tab, const unsigned short *b_tab, int r, int g, int b) {
+    int n = (r_tab == HYUNDAI_R) ? 74 : 64;
+    for (int i = 0; i < n; i++)
         if (r_tab[i] == r && g_tab[i] == g && b_tab[i] == b) return 1;
     return 0;
 }
+static int cfg_color(const char *k, int def, int min_special) {
+    char s[64];
+    cfg_str(k, s, sizeof s, "");
+    if (!s[0]) return def;
+    unsigned hex = 0;
+    if (s[0] == '#' && sscanf(s + 1, "%6x", &hex) == 1)
+        return nearest_vivid_wheel((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
+    char *e; long v = strtol(s, &e, 10);
+    if (e == s) return def;
+    if (v < min_special) return min_special;
+    if (v >= wheel_n) {
+        if (v < 74) return nearest_vivid_wheel(HYUNDAI_R[v], HYUNDAI_G[v], HYUNDAI_B[v]);
+        return wheel_n - 1;
+    }
+    return (int)v;
+}
 
-
-/* bands: "lo-hi:colour:boost ..." e.g. "40-150:22:1 150-500:#FF3C0F:2" (wheel index 0-63 or #RRGGBB snapped to active vivid wheel) */
+/* bands: "lo-hi:colour:boost ..." e.g. "40-150:22:1 150-500:#FF3C0F:2" (wheel index 0..73 or #RRGGBB snapped to active vivid wheel) */
 static const char *DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FF40:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
 static int parse_bands(const char *txt, Band *out) {
     int n = 0; const char *p = txt;
@@ -254,15 +338,16 @@ static int parse_bands(const char *txt, Band *out) {
             k = sscanf(p, "%d-%d:%d:%lf%n", &lo, &hi, &col, &g, &used);
             if (k < 3) { k = sscanf(p, "%d-%d:%d%n", &lo, &hi, &col, &used); g = 1; }
         }
-        if (k < 3 || used == 0 || lo < 0 || hi <= lo || hi > MAX_RATE / 2 || g < 0 || (!is_hex && (col < 0 || col > 63))) return -1;
+        if (k < 3 || used == 0 || lo < 0 || hi <= lo || hi > MAX_RATE / 2 || g < 0 || (!is_hex && (col < 0 || col >= MAXWHEEL))) return -1;
         out[n].lo = lo; out[n].hi = hi; out[n].gain = g;
         if (is_hex) {
             int vi = nearest_vivid_wheel((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
             out[n].color = -1; out[n].hex_rgb = (int)hex;
             out[n].r = WHEEL_R[vi]; out[n].g = WHEEL_G[vi]; out[n].b = WHEEL_B[vi];
         } else {
+            int ec = col >= wheel_n ? nearest_vivid_wheel(HYUNDAI_R[col], HYUNDAI_G[col], HYUNDAI_B[col]) : col;
             out[n].color = col; out[n].hex_rgb = -1;
-            out[n].r = WHEEL_R[col]; out[n].g = WHEEL_G[col]; out[n].b = WHEEL_B[col];
+            out[n].r = WHEEL_R[ec]; out[n].g = WHEEL_G[ec]; out[n].b = WHEEL_B[ec];
         }
         n++;
         p += used;
@@ -286,18 +371,18 @@ static void load_config(const char *dir) {
     C.min_interval_ms = clampi(cfg_int("min_interval_ms", repo ? 100 : 50), 20, 5000);
     C.speed_low = clampi(cfg_int("speed_low", 0), 0, 300);
     C.speed_high = clampi(cfg_int("speed_high", 80), 0, 300);
-    C.speed_color_low = clampi(cfg_int("speed_color_low", 44), 0, 63);
-    C.speed_color_high = clampi(cfg_int("speed_color_high", 22), 0, 63);
+    C.speed_color_low = cfg_color("speed_color_low", 44, 0);
+    C.speed_color_high = cfg_color("speed_color_high", 22, 0);
     cfg_str("speed_unit", C.speed_unit, sizeof C.speed_unit, "auto");   /* auto: the car's own units */
     C.power_low = clampi(cfg_int("power_low", -50), -300, 400);
     C.power_high = clampi(cfg_int("power_high", 150), -300, 400);
-    C.power_color_low = clampi(cfg_int("power_color_low", 0), 0, 63);
-    C.power_color_zero = clampi(cfg_int("power_color_zero", 44), 0, 63);
-    C.power_color_high = clampi(cfg_int("power_color_high", 22), 0, 63);
+    C.power_color_low = cfg_color("power_color_low", 0, 0);
+    C.power_color_zero = cfg_color("power_color_zero", 44, 0);
+    C.power_color_high = cfg_color("power_color_high", 22, 0);
     C.eff_low = clampi(cfg_int("eff_low", 20), 0, 200);
     C.eff_high = clampi(cfg_int("eff_high", 45), 0, 200);
-    C.eff_color_low = clampi(cfg_int("eff_color_low", 22), 0, 63);
-    C.eff_color_high = clampi(cfg_int("eff_color_high", 44), 0, 63);
+    C.eff_color_low = cfg_color("eff_color_low", 22, 0);
+    C.eff_color_high = cfg_color("eff_color_high", 44, 0);
     cfg_str("eff_unit", C.eff_unit, sizeof C.eff_unit, "auto");
     cfg_str("gauge_brightness", C.gauge_bright, sizeof C.gauge_bright, "10");   /* as the app shows it until changed */
     C.gauge_dim = cfg_int("gauge_dim", 0) ? 1 : 0;
@@ -318,10 +403,20 @@ static void load_config(const char *dir) {
     C.skip_white = cfg_int("skip_white", 1);
     C.auto_bpm = cfg_int("auto_bpm", repo ? 0 : 1) ? 1 : 0;
     C.pulse_decay = clampi(cfg_int("pulse_decay", 35), 0, 99);
-    C.pulse_color = clampi(cfg_int("pulse_color", -1), -2, 63);   /* -1 the car's own colour, -2 the drive-mode colour */
+    C.pulse_color = cfg_color("pulse_color", -1, -2);   /* -1 the car's own colour, -2 the drive-mode colour */
     C.pulse_set_car = cfg_int("pulse_set_car", 0) ? 1 : 0;
+    C.duet_bed = cfg_color("duet_bed", vivid_at_hue(178.0), -1);
+    C.duet_accent = cfg_color("duet_accent", -1, -1);
+    C.drop_style = clampi(cfg_int("drop_style", 0), 0, 2);
+    C.drop_sensitivity = clampi(cfg_int("drop_sensitivity", 100), 50, 150);
+    C.syn_shift = ((cfg_int("syn_shift", 0) % 360) + 360) % 360;
+    C.ember_theme = clampi(cfg_int("ember_theme", 0), 0, 2);
+    C.drift_theme = clampi(cfg_int("drift_theme", 0), 0, 4);
+    C.drift_beats = clampi(cfg_int("drift_beats", 4), 2, 16);
+    cfg_str("nd_source", C.nd_source, sizeof C.nd_source, "power");
+    if (strcmp(C.nd_source, "speed")) snprintf(C.nd_source, sizeof C.nd_source, "power");
     C.switch_margin = clampi(cfg_int("switch_margin", 15), 0, 500);
-    C.band_smoothing_ms = clampi(cfg_int("band_smoothing_ms", repo ? 128 : 20), 0, 3000);
+    C.band_smoothing_ms = clampi(cfg_int("band_smoothing_ms", repo ? 128 : (!strcmp(C.mode, "synesthesia") ? 115 : 20)), 0, 3000);
     C.spectrum_dynamic = cfg_int("spectrum_dynamic", repo ? 0 : 1) ? 1 : 0;
     cfg_str("brightness_curve", C.bright_curve, sizeof C.bright_curve, repo ? "repo" : "range");
     cfg_str("bands", C.bands_text, sizeof C.bands_text, repo ? REPO_BANDS : DEFAULT_BANDS);
@@ -336,20 +431,21 @@ static void load_config(const char *dir) {
     snprintf(C.service_bin, sizeof C.service_bin, "/system/bin/service");
     snprintf(C.logcat_bin, sizeof C.logcat_bin, "/system/bin/logcat");
     cfg_str("light_service", C.svc_name, sizeof C.svc_name, "com.hkmc.micom.system");
-    C.bright_fixed = cfg_int("brightness_fixed", 0) && (!strcmp(C.mode, "spectrum") || !strcmp(C.mode, "beat"));
+    int can_fix = !strcmp(C.mode, "spectrum") || !strcmp(C.mode, "beat") || !strcmp(C.mode, "synesthesia") || !strcmp(C.mode, "drift");
+    C.bright_fixed = cfg_int("brightness_fixed", 0) && can_fix;
     if (C.bright_fixed) {        /* the colour still follows the music; the level stays put, with no flashes */
         int lvl = !strcmp(C.gauge_bright, "own") ? 10 : clampi(atoi(C.gauge_bright), 1, 10);
         C.bright_min = C.bright_max = lvl;
         C.flash_on_beat = 0;
     }
 }
-/* modes driven by a reading from the car rather than the music */
+/* modes driven solely by a reading from the car rather than the music */
 static int gauge_mode(void) {
     return !strcmp(C.mode, "speed") || !strcmp(C.mode, "power") || !strcmp(C.mode, "efficiency");
 }
 static int flash_enabled(void) {
     if (C.flash_on_beat >= 0) return C.flash_on_beat;
-    return !strcmp(C.mode, "beat");
+    return !strcmp(C.mode, "beat") || !strcmp(C.mode, "duet") || !strcmp(C.mode, "drop");
 }
 
 /* the app's settings folder, or the shipped defaults until the app has made it */
@@ -436,6 +532,15 @@ static void show_config(void) {
         C.mode, C.bright_min, C.bright_max, C.loudness_range_db, C.beat_low_hz, C.beat_high_hz, C.auto_bpm, C.sensitivity, C.beat_avg_ms,
         C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
         C.min_interval_ms, C.idle_seconds, C.silence_db, C.override_drive_mode);
+    if (!strcmp(C.mode, "duet")) say("settings: duet bed=%d accent=%d", C.duet_bed, C.duet_accent);
+    if (!strcmp(C.mode, "drop")) say("settings: drop style=%d sensitivity=%d%%", C.drop_style, C.drop_sensitivity);
+    if (!strcmp(C.mode, "synesthesia")) say("settings: synesthesia shift=%d deg smoothing=%dms", C.syn_shift, C.band_smoothing_ms);
+    if (!strcmp(C.mode, "ember")) say("settings: ember theme=%d decay=%d%%", C.ember_theme, C.pulse_decay);
+    if (!strcmp(C.mode, "drift")) say("settings: drift theme=%d beats=%d", C.drift_theme, C.drift_beats);
+    if (!strcmp(C.mode, "nightdrive")) {
+        if (!strcmp(C.nd_source, "speed")) say("settings: nightdrive (speed) %d..%d %s = #%d..#%d", C.speed_low, C.speed_high, C.speed_unit, C.speed_color_low, C.speed_color_high);
+        else say("settings: nightdrive (power) %d kW = #%d, 0 kW = #%d, %d kW = #%d", C.power_low, C.power_color_low, C.power_color_zero, C.power_high, C.power_color_high);
+    }
     if (!strcmp(C.mode, "speed")) say("settings: speed %d %s = colour #%d, %d %s = colour #%d", C.speed_low, C.speed_unit, C.speed_color_low, C.speed_high, C.speed_unit, C.speed_color_high);
     if (!strcmp(C.mode, "power")) say("settings: power %d kW = colour #%d, 0 kW = colour #%d, %d kW = colour #%d", C.power_low, C.power_color_low, C.power_color_zero, C.power_high, C.power_color_high);
     if (!strcmp(C.mode, "efficiency")) say("settings: efficiency (%s) %.1f %s/kWh = colour #%d, %.1f = colour #%d", C.eff_source, C.eff_low / 10.0, C.eff_unit, C.eff_color_low, C.eff_high / 10.0, C.eff_color_high);
@@ -1017,16 +1122,29 @@ typedef struct {
     int bpm_warmup;
     float flux_hist[BPM_HIST];
     int flux_pos, flux_filled, bpm_tick;
-    double flux_mean, flux_lp, bpm, bpm_conf;
+    double flux_mean, flux_lp, bpm, bpm_conf, quiet_ms;
     long long bpm_anchor_ms;
     double band_e[MAXBANDS], band_ref[MAXBANDS], band_score[MAXBANDS];
+    long long last_band_sw;
+    double mid_env, mid_ref;     /* duet: vocal/harmonic midrange presence (250-4200 Hz) */
+    double cent_smooth, cent_ref;/* synesthesia: continuous octave spectral centroid */
+    double fast_db, macro_db;    /* drop: short (300 ms) vs macro (6.5 s) song loudness */
+    double hi_fast, hi_slow;     /* drop: high-frequency riser tension (2.2-12 kHz) */
+    int drop_state;              /* drop: 0 = calm/breakdown, 1 = build-up/groove, 2 = full drop */
+    long long drop_until;
     double loud_ref_db;
-    double rep_ref;             /* repo curve: running loudness reference (linear, 16-bit units) */
+    double rep_ref;              /* repo curve: running loudness reference (linear, 16-bit units) */
     long long last_beat;
     int sel_band;
 } Ana;
 
-typedef struct { double db; int beat; int band; double beat_ratio; double onset_ratio; double band_db[MAXBANDS]; } Frame;
+typedef struct {
+    double db; int beat; int band;
+    double beat_ratio, onset_ratio;
+    double mid_norm, pitch_norm, riser_norm;
+    int drop_state;
+    double band_db[MAXBANDS];
+} Frame;
 
 static int tune_rem_sec(void);
 
@@ -1034,9 +1152,15 @@ static void ana_init(Ana *a) {
     memset(a, 0, sizeof *a);
     for (int i = 0; i < NWIN; i++) a->win[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * i / (NWIN - 1));
     a->sel_band = -1;
+    a->last_band_sw = -100000;
     a->last_beat = -100000;
     a->bpm_anchor_ms = -100000;
+    a->drop_until = -100000;
     a->beat_armed = 1;
+    a->cent_smooth = 2.8;
+    a->cent_ref = 2.8;
+    a->fast_db = -30;
+    a->macro_db = -30;
     a->loud_ref_db = -30;
     a->rep_ref = 50;
 }
@@ -1081,7 +1205,8 @@ static void ana_update_bpm(Ana *a) {
         double cand = 60000.0 / (L * BLOCK_MS);
         double lp = log2(cand / 120.0) / 0.58;
         double prior = 0.84 + 0.16 * exp(-0.5 * lp * lp);
-        if (a->bpm_conf >= 0.35 && a->bpm > 50.0 && fabs(cand - a->bpm) < 5.0) prior *= 1.08;
+        if (a->bpm_conf >= 0.60 && a->bpm > 50.0 && fabs(cand - a->bpm) < 5.5) prior *= 1.18;
+        else if (a->bpm_conf >= 0.35 && a->bpm > 50.0 && fabs(cand - a->bpm) < 5.0) prior *= 1.08;
         score[L] = (r[L] + c2 + c3) * prior;
         if (L >= lag_lo && L <= lag_hi && score[L] > score[best_L]) best_L = L;
     }
@@ -1205,6 +1330,7 @@ static double band_energy(const float *re, const float *im, int lo_hz, int hi_hz
     return e / ((double)NWIN * NWIN);
 }
 static double db10(double e) { return e > 1e-14 ? 10 * log10(e) : -140; }
+static double clamp01(double x) { return x < 0.0 ? 0.0 : x > 1.0 ? 1.0 : x; }
 
 static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     Frame f; memset(&f, 0, sizeof f); f.band = a->sel_band;
@@ -1255,6 +1381,7 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     }
     if (a->bpm_warmup < 4) a->bpm_warmup++;
     if (f.db > C.silence_db) {
+        a->quiet_ms = 0;
         a->flux_mean += (BLOCK_MS / (BLOCK_MS + 220.0)) * (raw_on - a->flux_mean);
         double on = raw_on > a->flux_mean ? raw_on - a->flux_mean : 0.0;
         a->flux_lp += (BLOCK_MS / (BLOCK_MS + 15.0)) * (on - a->flux_lp);   /* ~20 ms pulse kernel tolerates human micro-timing */
@@ -1263,12 +1390,18 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
         if (a->flux_filled < BPM_HIST) a->flux_filled++;
         if (++a->bpm_tick >= 24 && a->flux_filled >= 260) { a->bpm_tick = 0; ana_update_bpm(a); }
     } else {
-        a->flux_lp *= 0.5;
-        a->flux_hist[a->flux_pos] = 0.0f;
-        a->flux_pos = (a->flux_pos + 1) % BPM_HIST;
-        if (a->flux_filled < BPM_HIST) a->flux_filled++;
-        a->bpm_conf *= exp(-BLOCK_MS / 2500.0);
-        if (a->bpm_conf < 0.05) { a->bpm_conf = 0; a->bpm = 0; }
+        a->quiet_ms += BLOCK_MS;
+        if (a->quiet_ms >= 450.0) {   /* CarPlay track-skip gap: start the next song with a clean tempo slate */
+            a->flux_pos = 0; a->flux_filled = 0; a->bpm_tick = 0;
+            a->flux_mean = 0; a->flux_lp = 0; a->bpm = 0; a->bpm_conf = 0;
+        } else {
+            a->flux_lp *= 0.5;
+            a->flux_hist[a->flux_pos] = 0.0f;
+            a->flux_pos = (a->flux_pos + 1) % BPM_HIST;
+            if (a->flux_filled < BPM_HIST) a->flux_filled++;
+            a->bpm_conf *= exp(-BLOCK_MS / 2500.0);
+            if (a->bpm_conf < 0.05) { a->bpm_conf = 0; a->bpm = 0; }
+        }
     }
 
     double accent = eb + 0.65 * flux;   /* sharp percussive attacks punch cleanly above sustained sub-bass */
@@ -1309,7 +1442,74 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     double eb_capped = eb > 4.0 * a->beat_slow ? 4.0 * a->beat_slow : eb;
     a->beat_slow += alpha_slow * (eb_capped - a->beat_slow);
 
-    /* spectrum bands (smoothed, boosted, optionally auto-adapted per band); loudest wins with switching margin */
+    /* duet midrange/vocal presence (250-4200 Hz) */
+    double e_mid = band_energy(a->re, a->im, 250, 4200);
+    a->mid_env += (BLOCK_MS / (BLOCK_MS + 180.0)) * (e_mid - a->mid_env);
+    if (f.db > C.silence_db) {
+        if (a->mid_ref <= 0) a->mid_ref = e_mid > 1e-11 ? e_mid : 1e-11;
+        else a->mid_ref += (BLOCK_MS / 2600.0) * ((e_mid > 3.0 * a->mid_ref ? 3.0 * a->mid_ref : e_mid) - a->mid_ref);
+    }
+    f.mid_norm = clamp01(0.45 + 0.32 * log2((a->mid_env + 1e-12) / (a->mid_ref + 1e-12)));
+
+    /* synesthesia continuous log-frequency spectral centroid (55..8000 Hz, pink-tilt compensated) */
+    {
+        int k_lo = (int)ceil(55.0 / BIN_HZ), k_hi = (int)floor(8000.0 / BIN_HZ);
+        if (k_lo < 1) k_lo = 1;
+        if (k_hi > NFFT / 2 - 1) k_hi = NFFT / 2 - 1;
+        double w_sum = 0, oct_sum = 0;
+        for (int k = k_lo; k <= k_hi; k++) {
+            double fk = k * BIN_HZ;
+            double ek = ((double)a->re[k] * a->re[k] + (double)a->im[k] * a->im[k]) * pow(fk / 250.0, 0.75);
+            w_sum += ek;
+            oct_sum += ek * log2(fk / 55.0);
+        }
+        if (f.db > C.silence_db && w_sum > 1e-9) {
+            double oct = oct_sum / w_sum;
+            double sm_ms = C.band_smoothing_ms > 20 ? C.band_smoothing_ms : 115;
+            a->cent_smooth += (BLOCK_MS / (BLOCK_MS + sm_ms)) * (oct - a->cent_smooth);
+            a->cent_ref += (BLOCK_MS / 6000.0) * (oct - a->cent_ref);
+            if (a->cent_ref < 1.8) a->cent_ref = 1.8;
+            if (a->cent_ref > 4.2) a->cent_ref = 4.2;
+        }
+        f.pitch_norm = clamp01(0.5 + (a->cent_smooth - a->cent_ref) / 2.6);
+    }
+
+    /* drop architect macro structure: verse/breakdown (0) vs riser build-up (1) vs full drop (2) */
+    if (f.db > C.silence_db) {
+        if (t < 1200) {
+            a->fast_db += 0.25 * (f.db - a->fast_db);
+            a->macro_db += 0.12 * (f.db - a->macro_db);
+        } else {
+            a->fast_db += (BLOCK_MS / (BLOCK_MS + 300.0)) * (f.db - a->fast_db);
+            a->macro_db += (BLOCK_MS / (BLOCK_MS + 6500.0)) * (f.db - a->macro_db);
+        }
+        double e_hi = band_energy(a->re, a->im, 2200, 12000);
+        if (a->hi_slow <= 0) { a->hi_fast = a->hi_slow = e_hi > 1e-12 ? e_hi : 1e-12; }
+        else {
+            a->hi_fast += (BLOCK_MS / (BLOCK_MS + 350.0)) * (e_hi - a->hi_fast);
+            a->hi_slow += (BLOCK_MS / (BLOCK_MS + 5000.0)) * (e_hi - a->hi_slow);
+        }
+        double db_lift = a->fast_db - a->macro_db;
+        double riser = log2((a->hi_fast + 1e-12) / (a->hi_slow + 1e-12));
+        double bps = a->beat_density / 2.4;
+        double ds = 100.0 / (double)clampi(C.drop_sensitivity, 50, 150);
+        f.riser_norm = clamp01(0.35 + 0.20 * db_lift + 0.28 * riser);
+        if ((db_lift > 1.05 * ds && bps >= 1.10) || (f.beat && f.beat_ratio > 2.15 * ds && db_lift > -0.35 * ds && bps >= 1.20)) {
+            a->drop_state = 2;
+            a->drop_until = t + 2200;
+        } else if (a->drop_state == 2) {
+            if (t >= a->drop_until && (db_lift < -0.75 || bps < 0.55)) a->drop_state = 1;
+        }
+        if (a->drop_state != 2) {
+            if (db_lift < -1.75 || (bps < 0.42 && riser < 0.22)) a->drop_state = 0;
+            else a->drop_state = 1;
+        }
+    } else if (t >= a->drop_until) {
+        a->drop_state = 0;
+    }
+    f.drop_state = a->drop_state;
+
+    /* spectrum bands (smoothed, boosted, optionally auto-adapted per band); 115 ms dwell prevents LIN mid-fade mud */
     double alpha_b = C.band_smoothing_ms > 0 ? BLOCK_MS / (BLOCK_MS + C.band_smoothing_ms) : 1.0;
     double alpha_ref = BLOCK_MS / 2500.0;
     if (t < 1500) alpha_ref = alpha_ref * 4 > 0.4 ? 0.4 : alpha_ref * 4;
@@ -1339,8 +1539,17 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
         f.band_db[i] = db10(sc);
         if (sc > a->band_score[best]) best = i;
     }
-    if (a->sel_band < 0 || a->sel_band >= C.nbands) a->sel_band = best;
-    else if (best != a->sel_band && a->band_score[best] > a->band_score[a->sel_band] * (1 + C.switch_margin / 100.0)) a->sel_band = best;
+    if (a->sel_band < 0 || a->sel_band >= C.nbands) {
+        a->sel_band = best;
+        a->last_band_sw = t;
+    } else if (best != a->sel_band) {
+        double need = 1.0 + C.switch_margin / 100.0;
+        int dwell_ok = (t - a->last_band_sw >= 115) || (f.beat && a->band_score[best] > a->band_score[a->sel_band] * need * 1.35);
+        if (dwell_ok && a->band_score[best] > a->band_score[a->sel_band] * need) {
+            a->sel_band = best;
+            a->last_band_sw = t;
+        }
+    }
     f.band = a->sel_band;
 
     if (f.db > C.silence_db) a->loud_ref_db += (BLOCK_MS / 1800.0) * (f.db - a->loud_ref_db);
@@ -1374,67 +1583,213 @@ static int loud_level(Ana *a, int cur_level, double db) {
 /* ---------- light driver ---------- */
 typedef struct {
     int idx;
-    int sent_idx, sent_level;   /* sent_idx holds the packed RGB last sent */
+    int sent_idx, sent_level;   /* sent_idx holds the 27-bit packed RGB last sent */
     int want_r, want_g, want_b, want_level;
     long long last_color, last_bright;
     double pulse;
-    long long flash_until, pulse_hold_until;
+    long long flash_until, pulse_hold_until, bar_swell_until, last_drift_ms;
+    int beat_count, drift_step, was_flashing;
 } Drv;
 
+static int gcd_int(int a, int b) { while (b) { int r = a % b; a = b; b = r; } return a; }
+
 static int wheel_pale(int i) {   /* the pastel/white stretch of the wheel (used by Speed/Power/Efficiency fade walk) */
-    int m = WHEEL_R[i] < WHEEL_G[i] ? WHEEL_R[i] : WHEEL_G[i];
-    if (WHEEL_B[i] < m) m = WHEEL_B[i];
+    int r = WHEEL_R[i] & 0xff, g = WHEEL_G[i] & 0xff, b = WHEEL_B[i] & 0xff;
+    int m = r < g ? r : g;
+    if (b < m) m = b;
     return m > 150;
 }
-static int wheel_ok(int i) { return !C.skip_white || wheel_saturated(i); }
 static int wheel_next(int i, int step) {
     if (step < 1) step = 1;
-    for (int k = 0; k < 64; k++) { i = (i + (k < 12 ? step : 1)) % 64; if (wheel_ok(i)) return i; }
-    return i;
+    if (C.skip_white && vivid_n > 2) {
+        int pos = 0;
+        for (int k = 0; k < vivid_n; k++) if (vivid_ring[k] == i) { pos = k; break; }
+        int rstep = (int)lround(step * (double)vivid_n / 64.0);
+        if (rstep < 1) rstep = 1;
+        if (rstep >= vivid_n) rstep = vivid_n - 1;
+        if (step >= 5) {   /* keep wide beat steps coprime to vivid_n so Beat visits every vivid swatch */
+            for (int d = 0; d < vivid_n / 2; d++) {
+                if (rstep + d < vivid_n && gcd_int(rstep + d, vivid_n) == 1) { rstep += d; break; }
+                if (rstep - d >= 1 && gcd_int(rstep - d, vivid_n) == 1) { rstep -= d; break; }
+            }
+        }
+        return vivid_ring[(pos + rstep) % vivid_n];
+    }
+    return (i + step) % wheel_n;
 }
+
+static double pulse_env_step(Drv *d, const Ana *a, Frame f, long long t) {
+    double keep = pow(eff_pulse_decay_frac(a), BLOCK_MS / 100.0);
+    if (t >= d->pulse_hold_until) d->pulse *= keep;
+    double floor_r = 1.20, ceil_r = C.sensitivity / 100.0;
+    if (ceil_r < floor_r + 0.15) ceil_r = floor_r + 0.15;
+    double hit = f.onset_ratio > floor_r ? (f.onset_ratio - floor_r) / (ceil_r - floor_r) : 0;
+    if (hit > 1) hit = 1;
+    hit = hit * hit;   /* ignore steady bass swell; only percussive jumps push sub-beat hits */
+    if (hit > d->pulse) d->pulse = hit;
+    if (f.beat) { d->pulse = 1.0; d->pulse_hold_until = t + eff_pulse_hold_ms(a); }
+    return d->pulse;
+}
+
+static double hue_lerp(double a, double b, double x) {
+    double d = fmod(b - a + 540.0, 360.0) - 180.0;
+    double h = fmod(a + d * x, 360.0);
+    return h < 0.0 ? h + 360.0 : h;
+}
+static int ember_wheel_at(int theme, double heat) {
+    /* 4-stop thermal cooling curves (coal -> warm glow -> hot body -> peak flare) */
+    static const double stops[3][4] = {
+        {268.0, 355.0,  18.0,  40.0},   /* 0 Fire:   Ember Violet -> Crimson -> Flame Orange -> Marigold Gold */
+        {250.0, 292.0, 210.0, 182.0},   /* 1 Plasma: Deep Indigo -> Vivid Orchid -> Ocean Blue -> Electric Cyan */
+        {225.0, 178.0,  92.0,  40.0}    /* 2 Aurora: Deep Ocean -> Mindful Teal -> Emerald Green -> Marigold Gold */
+    };
+    const double *s = stops[clampi(theme, 0, 2)];
+    double h;
+    if (heat < 0.33) h = hue_lerp(s[0], s[1], heat / 0.33);
+    else if (heat < 0.72) h = hue_lerp(s[1], s[2], (heat - 0.33) / 0.39);
+    else h = hue_lerp(s[2], s[3], (heat - 0.72) / 0.28);
+    return vivid_at_hue(h);
+}
+static int drift_wheel_at(int theme, int step) {
+    static const double themes[4][5] = {
+        { 92.0, 178.0, 209.0, 268.0, 145.0},   /* 0 Forest & Aurora: Emerald -> Teal -> Ocean -> Dream Purple -> Jade */
+        {186.0, 236.0, 290.0, 330.0, 356.0},   /* 1 Cyberpunk:       Cyan -> Royal Blue -> Orchid -> Hot Pink -> Crimson */
+        { 40.0,  16.0, 356.0, 316.0, 270.0},   /* 2 Sunset:          Gold -> Flame -> Crimson -> Magenta -> Violet */
+        {176.0, 192.0, 209.0, 232.0, 256.0}    /* 3 Ocean Deep:      Teal -> Cyan -> Ocean Blue -> Royal Blue -> Indigo */
+    };
+    if (theme >= 4 && vivid_n > 0) return vivid_ring[(step * 3) % vivid_n];
+    return vivid_at_hue(themes[clampi(theme, 0, 3)][step % 5]);
+}
+
+static int power_wheel_index(double kw);
+static int speed_wheel_index(double kmh);
+static int read_power(double *kw);
+static int read_cached_speed(double *kmh);
 
 #define BEAT_GUARD_MS 25
 static void drive(Drv *d, Ana *a, Frame f, long long t) {
-    int want_idx, want_level, wr = 0, wg = 0, wb = 0;
+    int want_idx = d->idx, want_level = C.bright_min, wr = 0, wg = 0, wb = 0;
     int fms = eff_flash_ms(a);
     int use_flash = flash_enabled() && fms > 0;
-    if (f.beat && use_flash) d->flash_until = t + fms;
-    int flashing = use_flash && t < d->flash_until;
+    if (f.beat && (use_flash || !strcmp(C.mode, "duet") || !strcmp(C.mode, "drop")))
+        d->flash_until = t + (fms > 0 ? fms : 120);
+    int flashing = t < d->flash_until;
+    int flash_ended = d->was_flashing && !flashing;
+    d->was_flashing = flashing;
 
     if (!strcmp(C.mode, "spectrum")) {
         if (f.band >= 0) { wr = C.bands[f.band].r; wg = C.bands[f.band].g; wb = C.bands[f.band].b; want_idx = 1000 + f.band; }
-        else want_idx = d->idx;
-        want_level = use_flash ? (flashing ? C.bright_max : C.bright_min) : loud_level(a, d->sent_level, f.db);
+        want_level = (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
     } else if (!strcmp(C.mode, "pulse")) {
-        double keep = pow(eff_pulse_decay_frac(a), BLOCK_MS / 100.0);
-        if (t >= d->pulse_hold_until) d->pulse *= keep;
-        double floor_r = 1.20, ceil_r = C.sensitivity / 100.0;
-        if (ceil_r < floor_r + 0.15) ceil_r = floor_r + 0.15;
-        double hit = f.onset_ratio > floor_r ? (f.onset_ratio - floor_r) / (ceil_r - floor_r) : 0;
-        if (hit > 1) hit = 1;
-        hit = hit * hit;   /* ignore steady bass swell; only percussive jumps push sub-beat hits */
-        if (hit > d->pulse) d->pulse = hit;
-        if (f.beat) { d->pulse = 1.0; d->pulse_hold_until = t + eff_pulse_hold_ms(a); }
-        double shaped = d->pulse * d->pulse;   /* gamma curve: plunge fast into dark trough between beats */
+        double p = pulse_env_step(d, a, f, t);
         want_idx = C.pulse_color;   /* -1 keeps the user's colour */
-        if (want_idx >= 0) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
-        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * shaped);
+        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (p * p));
+    } else if (!strcmp(C.mode, "duet")) {
+        if (f.beat) d->beat_count++;
+        static const double cool_beds[4] = {178.0, 209.0, 92.0, 268.0};
+        int bed = C.duet_bed >= 0 ? C.duet_bed : vivid_at_hue(cool_beds[(d->beat_count / 8) % 4]);
+        int acc = C.duet_accent >= 0 ? C.duet_accent : vivid_at_hue(wheel_hue(bed) + 180.0);
+        if (flashing) {
+            want_idx = acc;
+            want_level = C.bright_max;
+        } else {
+            want_idx = bed;
+            int ceil_b = C.bright_min + (int)lround(0.50 * (C.bright_max - C.bright_min));
+            if (ceil_b < C.bright_min) ceil_b = C.bright_min;
+            want_level = C.bright_min + (int)lround((ceil_b - C.bright_min) * f.mid_norm);
+        }
+        d->idx = want_idx;
+    } else if (!strcmp(C.mode, "drop")) {
+        if (f.beat) d->beat_count++;
+        if (f.drop_state == 2) {   /* Full Drop: high-impact neon leaps + deep blackout valleys */
+            static const double drop_hues[3][6] = {
+                {  0.0,  40.0, 315.0,  92.0, 185.0, 288.0},
+                {  0.0,  20.0,  40.0, 340.0,  12.0, 315.0},
+                {355.0, 315.0, 288.0, 185.0, 235.0, 335.0}
+            };
+            if (f.beat || d->idx < 0) d->idx = vivid_at_hue(drop_hues[C.drop_style][d->beat_count % 6]);
+            want_idx = d->idx;
+            want_level = flashing ? C.bright_max : C.bright_min;
+        } else if (f.drop_state == 1) {   /* Build-Up / Groove: rising tension in both hue and brightness */
+            double h0 = C.drop_style == 1 ? 210.0 : C.drop_style == 2 ? 255.0 : 215.0;
+            double h1 = C.drop_style == 1 ?  38.0 : C.drop_style == 2 ? 320.0 :  25.0;
+            want_idx = vivid_at_hue(hue_lerp(h0, h1, f.riser_norm));
+            int b_lo = C.bright_min > 1 ? C.bright_min : 2;
+            int b_hi = C.bright_max > 3 ? C.bright_max - 2 : C.bright_max;
+            if (b_hi < b_lo) b_hi = b_lo;
+            want_level = b_lo + (int)lround((b_hi - b_lo) * f.riser_norm);
+            if (flashing && want_level + 2 <= C.bright_max) want_level += 2;
+            d->idx = want_idx;
+        } else {   /* Breakdown / Calm Verse: deep cool simmer */
+            static const double calm_hues[4] = {209.0, 245.0, 270.0, 178.0};
+            if (t - d->last_drift_ms >= 3200) { d->drift_step++; d->last_drift_ms = t; }
+            want_idx = vivid_at_hue(calm_hues[d->drift_step % 4]);
+            int simmer_lo = C.bright_min > 1 ? C.bright_min : 1;
+            int simmer_hi = simmer_lo + 2 <= C.bright_max ? simmer_lo + 2 : C.bright_max;
+            want_level = simmer_lo + (int)lround((simmer_hi - simmer_lo) * f.mid_norm);
+            d->idx = want_idx;
+        }
+    } else if (!strcmp(C.mode, "synesthesia")) {
+        double hue = fmod(C.syn_shift + f.pitch_norm * 285.0, 360.0);
+        want_idx = vivid_at_hue(hue);
+        d->idx = want_idx;
+        want_level = C.bright_fixed ? C.bright_max : (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
+    } else if (!strcmp(C.mode, "ember")) {
+        double heat = pulse_env_step(d, a, f, t);
+        want_idx = ember_wheel_at(C.ember_theme, heat);
+        d->idx = want_idx;
+        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (heat * heat));
+    } else if (!strcmp(C.mode, "drift")) {
+        if (f.beat) {
+            d->beat_count++;
+            d->last_drift_ms = t;
+            if (d->beat_count % C.drift_beats == 0) {
+                d->drift_step++;
+                d->bar_swell_until = t + 260;
+            }
+        } else if (t - d->last_drift_ms >= 3800) {
+            d->drift_step++;
+            d->last_drift_ms = t;
+        }
+        want_idx = drift_wheel_at(C.drift_theme, d->drift_step);
+        d->idx = want_idx;
+        if (C.bright_fixed) want_level = C.bright_max;
+        else if (use_flash) want_level = flashing ? C.bright_max : C.bright_min;
+        else {
+            want_level = loud_level(a, d->sent_level, f.db);
+            if (t < d->bar_swell_until && want_level < C.bright_max) want_level++;
+        }
+    } else if (!strcmp(C.mode, "nightdrive")) {
+        double p = pulse_env_step(d, a, f, t);
+        if (!strcmp(C.nd_source, "speed")) {
+            double kmh = 0; read_cached_speed(&kmh);
+            want_idx = speed_wheel_index(kmh);
+        } else {
+            double kw = 0; read_power(&kw);
+            want_idx = power_wheel_index(kw);
+        }
+        d->idx = want_idx;
+        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (p * p));
     } else {   /* beat */
         if (f.beat) d->idx = wheel_next(d->idx, C.beat_step);
         want_idx = d->idx;
-        want_level = use_flash ? (flashing ? C.bright_max : C.bright_min) : loud_level(a, d->sent_level, f.db);
+        want_level = (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
     }
-    if (want_idx >= 0 && want_idx < 64) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
+    if (want_idx >= 0 && want_idx < wheel_n) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
     d->want_r = wr; d->want_g = wg; d->want_b = wb; d->want_level = want_level;
 
     reap();
     if (pending_pid) return;   /* a service call (no helper) still in flight: one at a time */
 
     /* on a beat peak or trough drop, send down to BEAT_GUARD_MS so peaks and dark valleys aren't clipped */
-    int pulse_mode = !strcmp(C.mode, "pulse");
+    int pulse_like = !strcmp(C.mode, "pulse") || !strcmp(C.mode, "ember") || !strcmp(C.mode, "nightdrive");
+    int fast_col_mode = !strcmp(C.mode, "duet") || (!strcmp(C.mode, "drop") && f.drop_state == 2);
     int beat_iv = C.min_interval_ms < BEAT_GUARD_MS ? C.min_interval_ms : BEAT_GUARD_MS;
-    int col_iv = f.beat ? beat_iv : C.min_interval_ms;
-    int key = want_idx < 0 ? -1 : (wr << 16) | (wg << 8) | wb;
+    int base_col_iv = C.min_interval_ms;
+    if (!strcmp(C.mode, "synesthesia") && base_col_iv < 110) base_col_iv = 110;
+    else if (!strcmp(C.mode, "ember") && base_col_iv < 65) base_col_iv = 65;
+    int col_iv = (f.beat || (fast_col_mode && flash_ended)) ? beat_iv : base_col_iv;
+    int key = want_idx < 0 ? -1 : ((wr & 0x1ff) << 18) | ((wg & 0x1ff) << 9) | (wb & 0x1ff);
     if (key >= 0 && key != d->sent_idx && t - d->last_color >= col_iv) {
         light_rgb(wr, wg, wb, 0);
         d->sent_idx = key; d->last_color = t;
@@ -1444,7 +1799,8 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
         }
         if (pending_pid) return;   /* through service call: the brightness waits its turn */
     }
-    int snap_bright = (f.beat && (flashing || pulse_mode)) || ((use_flash || pulse_mode) && want_level == C.bright_min);
+    int flash_like = use_flash || !strcmp(C.mode, "duet") || (!strcmp(C.mode, "drop") && f.drop_state == 2);
+    int snap_bright = (f.beat && (flashing || pulse_like)) || (flash_like && flash_ended) || ((flash_like || pulse_like) && want_level == C.bright_min);
     int br_iv = snap_bright ? beat_iv : C.min_interval_ms;
     if (want_level != d->sent_level && t - d->last_bright >= br_iv) {
         light_bright_raw(want_level + 1, 0);
@@ -1505,6 +1861,7 @@ static void meter_broadcast(const char *b, int n) {
     }
 }
 typedef struct { long long last; int beats; double peak; } MeterStream;
+#define KMH_PER_MPH 1.609344
 /* db average_db beat_peak beats selected_band nbands band_db... bpm bpm_conf tune_rem_s */
 static void meter_stream(MeterStream *m, Ana *a, Frame f, long long t) {
     if (f.beat) m->beats++;
@@ -1516,13 +1873,22 @@ static void meter_stream(MeterStream *m, Ana *a, Frame f, long long t) {
     for (int i = 0; i < C.nbands; i++) n += snprintf(b + n, sizeof b - n, " %.1f", f.band_db[i]);
     n += snprintf(b + n, sizeof b - n, " %.1f %.2f %d\n", a->bpm, a->bpm_conf, tune_rem_sec());
     meter_broadcast(b, n);
+    if (!strcmp(C.mode, "nightdrive")) {
+        double gv = 0; char gb[64];
+        if (!strcmp(C.nd_source, "speed") && read_cached_speed(&gv)) {
+            int gn = snprintf(gb, sizeof gb, "speed %.2f %d\n", speed_in_kmh() ? gv : gv / KMH_PER_MPH, speed_wheel_index(gv));
+            meter_broadcast(gb, gn);
+        } else if (strcmp(C.nd_source, "speed") && read_power(&gv)) {
+            int gn = snprintf(gb, sizeof gb, "power %.2f %d\n", gv, power_wheel_index(gv));
+            meter_broadcast(gb, gn);
+        }
+    }
     m->last = t; m->beats = 0; m->peak = 0;
 }
 
 /* ---------- speed mode: colour follows the car's speed, no audio involved ---------- */
 #define SPEED_POLL_MS 500            /* each read is one connection to HMG-API's vehicle service */
 #define SPEED_LOST_MS 15000          /* no readings this long: give the lamp back */
-#define KMH_PER_MPH 1.609344
 
 /* "speed 34.5\n" -> km/h; the service answers "-" when it has no value */
 static int parse_speed_reply(const char *b, double *kmh) {
@@ -1558,11 +1924,47 @@ static int read_speed(double *kmh) {
 }
 /* the wheel colour for a speed: walks the short way round the factory wheel from the low colour to the high
    one, because the lamp only takes table colours. Pale colours are left out of the walk unless the user picked
-   them, and the speeds are shared evenly over the colours left, so no stretch of road sits on one colour. */
+   them, and the speeds are shared evenly over the colours left, so no stretch of road sits on one colour.
+   When a 0x01xx stock colour (64..73) is involved, walks smoothly by hue along vivid_ring[]. */
 static int wheel_walk(double v, double lo, double hi, int a, int b) {
     double x = hi > lo ? (v - lo) / (hi - lo) : (v >= lo ? 1 : 0);
     if (x < 0) x = 0;
     if (x > 1) x = 1;
+    a = clampi(a, 0, wheel_n - 1);
+    b = clampi(b, 0, wheel_n - 1);
+    if (a == b) return a;
+    if ((a >= 64 || b >= 64) && vivid_n > 0) {
+        double ha = wheel_hue(a), hb = wheel_hue(b);
+        double dh = hb - ha;
+        if (dh > 180.0) dh -= 360.0;
+        if (dh < -180.0) dh += 360.0;
+        double span = fabs(dh);
+        int mid_idx[MAXWHEEL]; double mid_off[MAXWHEEL]; int mn = 0;
+        for (int k = 0; k < vivid_n; k++) {
+            int idx = vivid_ring[k];
+            if (idx == a || idx == b) continue;
+            double off = dh >= 0.0 ? fmod(vivid_hue[k] - ha + 360.0, 360.0) : fmod(ha - vivid_hue[k] + 360.0, 360.0);
+            if (off <= 4.0 || off >= span - 4.0) continue;
+            int pos = mn++;
+            while (pos > 0 && mid_off[pos - 1] > off) {
+                mid_off[pos] = mid_off[pos - 1];
+                mid_idx[pos] = mid_idx[pos - 1];
+                pos--;
+            }
+            mid_off[pos] = off;
+            mid_idx[pos] = idx;
+        }
+        int path[MAXWHEEL + 2], n = 0;
+        path[n++] = a;
+        double prev_off = -99.0;
+        for (int i = 0; i < mn; i++) {
+            if (mid_off[i] - prev_off < 2.5) continue;
+            path[n++] = mid_idx[i];
+            prev_off = mid_off[i];
+        }
+        path[n++] = b;
+        return path[(int)lround(x * (n - 1))];
+    }
     int d = (b - a + 64) % 64;
     if (d > 32) d -= 64;
     int steps = d < 0 ? -d : d, dir = d < 0 ? -1 : 1, path[64], n = 0;
@@ -1761,22 +2163,6 @@ static void diag_run(void) {
         say("lamp test: ceiling probe raw 12 -> %d, raw 15 -> %d", ceil12, ceil15);
     }
     dkv("b_ceil", "%d,%d", ceil12, ceil15);
-    int gp[4] = {-1, -1, -1, -1};
-    if (reply && !stop_flag) {   /* probe whether MICOM accepts pure green or 0x01 theme-channel rich green */
-        static const int grgb[4][3] = {
-            {0, 255, 0}, {104, 221, 98}, {0x0100, 0x01FF, 0x0100}, {0x0118, 0x01FD, 0x0140}
-        };
-        for (int gi = 0; gi < 4 && !stop_flag; gi++) {
-            light_rgb(grgb[gi][0], grgb[gi][1], grgb[gi][2], 1);
-            usleep((diag_hold_ms < 200 ? diag_hold_ms : 200) * 1000);
-            if (read_lamp(l) && lamp_fresh) {
-                gp[gi] = (l[0] == grgb[gi][0] && l[1] == grgb[gi][1] && l[2] == grgb[gi][2]) ? 1 : 0;
-                say("lamp test: green probe [%d] (0x%x,0x%x,0x%x) -> (0x%x,0x%x,0x%x) ok=%d",
-                    gi, grgb[gi][0], grgb[gi][1], grgb[gi][2], l[0], l[1], l[2], gp[gi]);
-            }
-        }
-    }
-    dkv("g_probe", "%d,%d,%d,%d", gp[0], gp[1], gp[2], gp[3]);
     diag_flush("restoring");
 
     int had_base = base.valid, want[5] = {base.r, base.g, base.b, base.bright_raw, base.drive_mode};
@@ -1787,8 +2173,8 @@ static void diag_run(void) {
     dkv("restored", "%d", restored);
     base.valid = 0;
     last_rgb[0] = last_rgb[1] = last_rgb[2] = -1; last_raw = -1;
-    say("lamp test done: replies %d, colours %d/%d, brightness %d/%d (ceil %d,%d, g_probe %d,%d,%d,%d), restored %d",
-        reply, c_ok, cn, b_ok, bn, ceil12, ceil15, gp[0], gp[1], gp[2], gp[3], restored);
+    say("lamp test done: replies %d, colours %d/%d, brightness %d/%d (ceil %d,%d), restored %d",
+        reply, c_ok, cn, b_ok, bn, ceil12, ceil15, restored);
     diag_flush("done");
 }
 static int write_report(const char *path, const char *colour, const char *bright) {
@@ -1820,7 +2206,7 @@ static struct {
     short *pcm_mem;
     char *csv_mem;
     size_t csv_len, csv_cap;
-    char sess_hdr[1536];
+    char sess_hdr[1792];
     char dir[340], rel[160];
     int req_sec, active, in_pcm, pcm_rate, last_rem;
     long long target_frames, pcm_cap_frames, written_frames, csv_rows;
@@ -1994,6 +2380,7 @@ static void tune_start(int srate) {
         "mode=%s\npreset=%s\nbrightness=%d..%d (fixed=%d, curve=%s, range_db=%d, dim=%d)\n"
         "auto_bpm=%d\nsensitivity=%d\nbeat_hz=%d-%d\nbeat_avg_ms=%d\nmin_beat_ms=%d\n"
         "flash_enabled=%d\nflash_ms=%d\nbeat_step=%d\nskip_white=%d\npulse_decay=%d\npulse_color=%d\n"
+        "duet=%d,%d\ndrop=%d,%d\nsyn_shift=%d\nember_theme=%d\ndrift=%d,%d\nnd_source=%s\n"
         "spectrum_dynamic=%d\nswitch_margin=%d\nband_smoothing_ms=%d\nbands=%s\n"
         "min_interval_ms=%d\nsilence_db=%d\n",
         VERSION, stamp_str, srate,
@@ -2001,6 +2388,7 @@ static void tune_start(int srate) {
         C.mode, C.preset, C.bright_min, C.bright_max, C.bright_fixed, C.bright_curve, C.loudness_range_db, C.gauge_dim,
         C.auto_bpm, C.sensitivity, C.beat_low_hz, C.beat_high_hz, C.beat_avg_ms, C.min_beat_ms,
         flash_enabled(), C.flash_ms, C.beat_step, C.skip_white, C.pulse_decay, C.pulse_color,
+        C.duet_bed, C.duet_accent, C.drop_style, C.drop_sensitivity, C.syn_shift, C.ember_theme, C.drift_theme, C.drift_beats, C.nd_source,
         C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
         C.min_interval_ms, C.silence_db);
     if (base.valid && hn > 0 && hn < (int)sizeof tune.sess_hdr - 80) {
@@ -2198,6 +2586,7 @@ static struct {
     long long last_t, last_saved, moved_t;
     int ready;                     /* last EV_RDY (flag 44): -1 not known yet */
     double kw; long long kw_t; int kw_ok;
+    double kmh; long long kmh_t; int kmh_ok;
     char boot[48];
 } en;
 static void boot_id(char *out, size_t n) {
@@ -2309,6 +2698,14 @@ static void *energy_thread(void *arg) {
     for (int n = 0; ; n++) {
         long long t0 = now_ms();
         energy_sample(n % (1000 / ENERGY_TICK_MS) == 0);
+        if (n % 2 == 0 && C.enabled && !strcmp(C.mode, "nightdrive") && !strcmp(C.nd_source, "speed")) {
+            double sp = 0;
+            if (read_speed(&sp)) {
+                pthread_mutex_lock(&en_mu);
+                en.kmh = sp; en.kmh_t = now_ms(); en.kmh_ok = 1;
+                pthread_mutex_unlock(&en_mu);
+            }
+        }
         long long left = ENERGY_TICK_MS - (now_ms() - t0);
         if (left > 0) usleep(left * 1000);
     }
@@ -2325,6 +2722,13 @@ static int read_power(double *kw) {
     pthread_mutex_lock(&en_mu);
     int ok = en.kw_ok && now_ms() - en.kw_t < 5000;
     if (ok) *kw = en.kw;
+    pthread_mutex_unlock(&en_mu);
+    return ok;
+}
+static int read_cached_speed(double *kmh) {
+    pthread_mutex_lock(&en_mu);
+    int ok = en.kmh_ok && now_ms() - en.kmh_t < 5000;
+    if (ok) *kmh = en.kmh;
     pthread_mutex_unlock(&en_mu);
     return ok;
 }
@@ -2417,6 +2821,45 @@ static void gauge_step(GaugeDrv *g, int *active) {
     char b[64];
     int n = snprintf(b, sizeof b, "%s %.2f %d\n", !strcmp(C.mode, "speed") ? "speed" : !strcmp(C.mode, "power") ? "power" : "eff",
                      !strcmp(C.mode, "speed") && !speed_in_kmh() ? v / KMH_PER_MPH : v, idx);   /* speed in the unit shown */
+    meter_broadcast(b, n);
+}
+static void nightdrive_idle_step(GaugeDrv *g, int *active) {
+    long long t = now_ms();
+    double v = 0;
+    int by_speed = !strcmp(C.nd_source, "speed");
+    int ok = by_speed ? read_cached_speed(&v) : read_power(&v);
+    if (!ok) {
+        if (*active && g->last_ok > 0 && t - g->last_ok > GAUGE_LOST_MS) {
+            say("no %s reading for %d s — lights back to normal", C.nd_source, GAUGE_LOST_MS / 1000);
+            restore_base(); *active = 0; base.valid = 0;
+        }
+        return;
+    }
+    g->last_ok = t;
+    if (!*active) {
+        if (!base.valid) snapshot_base();
+        take_over_lamp();
+        music_dim();
+        *active = 1; g->sent = -1; g->bright[0] = 0;
+        say("nightdrive cruise — lights following %s (%.1f now)", C.nd_source, v);
+    }
+    int cruise = clampi(C.bright_min + (C.bright_max - C.bright_min) / 4, C.bright_min > 0 ? C.bright_min : 1, C.bright_max);
+    char want_bright[16]; snprintf(want_bright, sizeof want_bright, "nd:%d/%d", cruise, C.gauge_dim);
+    if (strcmp(g->bright, want_bright)) {
+        music_dim();
+        wait_pending();
+        light_bright_raw(cruise + 1, 1);
+        snprintf(g->bright, sizeof g->bright, "%s", want_bright);
+    }
+    int idx = by_speed ? speed_wheel_index(v) : power_wheel_index(v);
+    check_tick();
+    if (idx != g->sent && !pending_pid && t - g->last_sent >= C.min_interval_ms) {
+        light_rgb(WHEEL_R[idx], WHEEL_G[idx], WHEEL_B[idx], 0);
+        g->sent = idx; g->last_sent = t;
+    }
+    char b[64];
+    int n = snprintf(b, sizeof b, "%s %.2f %d\n", by_speed ? "speed" : "power",
+                     by_speed && !speed_in_kmh() ? v / KMH_PER_MPH : v, idx);
     meter_broadcast(b, n);
 }
 
@@ -2643,7 +3086,7 @@ int main(int argc, char **argv) {
         }
         long long s = config_stamp();
         if (s != stamp) { stamp = s; load_config(active_dir()); say("settings changed"); show_config(); pulse_car_colour(lights_active); }
-        if (lights_active && (!C.enabled || !gauge_mode())) {   /* left speed, power or efficiency mode */
+        if (lights_active && (!C.enabled || (!gauge_mode() && strcmp(C.mode, "nightdrive")))) {   /* left speed, power, efficiency or nightdrive mode */
             restore_base(); lights_active = 0; base.valid = 0;
         }
         if (C.enabled != was_enabled) {
@@ -2667,7 +3110,14 @@ int main(int argc, char **argv) {
             tapped = 1;
         }
         int playing = music_rate();
-        if (!playing) { usleep(150 * 1000); continue; }     /* also how soon a setting change is seen */
+        if (!playing) {
+            if (!strcmp(C.mode, "nightdrive")) {
+                char want[32]; snprintf(want, sizeof want, "nightdrive/%s", C.nd_source);
+                if (strcmp(gd_mode, want)) { snprintf(gd_mode, sizeof gd_mode, "%s", want); gd.sent = -1; gd.last_sent = 0; gd.bright[0] = 0; }
+                nightdrive_idle_step(&gd, &lights_active);
+            }
+            usleep(150 * 1000); continue;     /* also how soon a setting change is seen */
+        }
         rate = playing;
 
         struct pcm_config cfg; memset(&cfg, 0, sizeof cfg);
@@ -2691,7 +3141,7 @@ int main(int argc, char **argv) {
         Meter mtr; memset(&mtr, 0, sizeof mtr);
         MeterStream ms; memset(&ms, 0, sizeof ms);
         int zero_blocks = 0, stalls = 0, xruns = 0;
-        long long t0 = now_ms(), quiet_since = -1, sound_since = -1, last_check = 0, last_fix = -100000;
+        long long t0 = now_ms(), quiet_since = -1, sound_since = -1, last_check = 0, last_fix = -100000, last_nd_idle = -1000;
         tune.in_pcm = 1;
         if (tune.req_sec > 0 && !tune.active) tune_start(rate);
         while (!stop_flag) {
@@ -2709,6 +3159,7 @@ int main(int argc, char **argv) {
                     if (!C.enabled || gauge_mode()) break;
                     ana_init(&a);                 /* bands and beat settings may have changed */
                     d.sent_idx = d.sent_level = -1;
+                    gd.sent = -1; gd.bright[0] = 0;
                     if (lights_active) music_dim();
                     if (lights_active && !strcmp(C.mode, "pulse")) {   /* pulse's colour may have changed */
                         pulse_car_colour(1);
@@ -2759,6 +3210,10 @@ int main(int argc, char **argv) {
                 if (fn.onset_ratio > f.onset_ratio) f.onset_ratio = fn.onset_ratio;
                 if (fn.db > f.db) f.db = fn.db;
                 f.band = fn.band;
+                f.mid_norm = fn.mid_norm;
+                f.pitch_norm = fn.pitch_norm;
+                f.riser_norm = fn.riser_norm;
+                f.drop_state = fn.drop_state;
                 memcpy(f.band_db, fn.band_db, sizeof f.band_db);
             }
             meter(&mtr, &a, f, t);
@@ -2780,15 +3235,28 @@ int main(int argc, char **argv) {
                     t = now_ms() - t0;
                     lights_active = 1; say("music started — lights following (%s)", C.mode);
                 }
+                gd.sent = -1; gd.bright[0] = 0;
                 drive(&d, &a, f, t);
                 check_tick();
             } else if (!lights_active) {
                 sound_since = -1;
+                if (!strcmp(C.mode, "nightdrive") && t - last_nd_idle >= 250) {
+                    last_nd_idle = t;
+                    nightdrive_idle_step(&gd, &lights_active);
+                }
             } else {
                 sound_since = -1;
                 if (quiet_since < 0) quiet_since = t;
                 if (t - quiet_since >= C.idle_seconds * 1000LL) {
-                    restore_base(); lights_active = 0; base.valid = 0; say("music quiet — lights back to normal");
+                    if (!strcmp(C.mode, "nightdrive")) {
+                        d.sent_idx = d.sent_level = -1;
+                        if (t - last_nd_idle >= 250) {
+                            last_nd_idle = t;
+                            nightdrive_idle_step(&gd, &lights_active);
+                        }
+                    } else {
+                        restore_base(); lights_active = 0; base.valid = 0; say("music quiet — lights back to normal");
+                    }
                 }
             }
             if (tune.active) { tune_write_frame(t, &a, &f, &d); if (!tune.active) pcm_drain_backlog(pcm, buf); }
@@ -2798,7 +3266,11 @@ int main(int argc, char **argv) {
         pcm_close(pcm);
         /* outside debug too: "music played but nothing was sent" is the first thing a report needs to show */
         if (sess_peak > -199) say("session: loudest %.0f dB (silence below %d), %d colour and %d brightness commands", sess_peak, C.silence_db, totals.colours - sess_colours, totals.brights - sess_brights);
-        if (lights_active) { restore_base(); lights_active = 0; base.valid = 0; }
+        if (lights_active && (strcmp(C.mode, "nightdrive") || !C.enabled || stop_flag || diag_pending)) {
+            restore_base(); lights_active = 0; base.valid = 0;
+        } else if (lights_active) {
+            gd.sent = -1; gd.bright[0] = 0;
+        }
         if (!stop_flag) usleep(300 * 1000);
     }
 

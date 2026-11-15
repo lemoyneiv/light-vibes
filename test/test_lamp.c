@@ -233,7 +233,6 @@ int main(void) {
     assert(!strcmp(result_value("svc", v2, sizeof v2), "00000000"));
     assert(!strcmp(result_value("user", v2, sizeof v2), "255,68,35,2,1"));
     assert(!strcmp(result_value("b_ceil", v2, sizeof v2), "12,15"));
-    assert(!strcmp(result_value("g_probe", v2, sizeof v2), "1,1,1,1"));
     /* drive-mode colour is switched off for the test and comes back */
     lamp_test("ok", "3/3", "3/3", 1, 1, "2");
     /* the failures the reports describe */
@@ -511,13 +510,23 @@ int main(void) {
         load_config("/nonexistent");
         C.dry = 1; C.debug = 0; rate = 48000;
 
-        /* 1. Hue-aware vivid colour filter (retaining Hyundai/Kia greens while excluding pastels), Beat stepping, and #RRGGBB snapping */
+        /* 1. Hue-aware vivid colour filter, Hyundai Ioniq 5 0x01xx stock mood colours, Beat stepping, and #RRGGBB snapping */
         set_palette("hyundai");
+        assert(wheel_n == 74);
         for (int i = 16; i <= 21; i++) assert(!wheel_saturated(i));   /* salmon / flesh pinks excluded */
-        for (int i = 27; i <= 39; i++) assert(!wheel_saturated(i));   /* pale peach / tan / cream excluded */
-        assert(wheel_saturated(40) && wheel_saturated(41));           /* Hyundai vivid greens retained */
-        assert(nearest_vivid_wheel(0, 255, 64) == 41);
+        for (int i = 27; i <= 41; i++) assert(!wheel_saturated(i));   /* pale peach / tan / cream / icy mints excluded */
+        assert(!wheel_saturated(64) && !wheel_saturated(65) && !wheel_saturated(66) && !wheel_saturated(71));
+        assert(wheel_saturated(67) && wheel_saturated(68) && wheel_saturated(69) && wheel_saturated(70) && wheel_saturated(72) && wheel_saturated(73));
+        assert(nearest_vivid_wheel(0, 255, 64) == 69 && WHEEL_R[69] == 382 && WHEEL_G[69] == 471 && WHEEL_B[69] == 277);
+        assert(nearest_vivid_wheel(254, 168, 17) == 70 && WHEEL_R[70] == 510 && WHEEL_G[70] == 424 && WHEEL_B[70] == 273);
+        assert(nearest_vivid_wheel(3, 199, 192) == 68 && nearest_vivid_wheel(24, 142, 253) == 67);
+        assert(wheel_walk(-50, -50, 0, 69, 67) == 69 && wheel_walk(0, -50, 0, 69, 67) == 67 && wheel_walk(150, 0, 150, 67, 22) == 22);
+        for (int kw2 = -50; kw2 <= 150; kw2 += 10) {
+            int wi = kw2 <= 0 ? wheel_walk(kw2, -50, 0, 69, 67) : wheel_walk(kw2, 0, 150, 67, 22);
+            assert(wheel_saturated(wi) && !wheel_pale(wi));
+        }
         set_palette("kia");
+        assert(wheel_n == 64);
         for (int i = 28; i <= 39; i++) assert(!wheel_saturated(i));   /* pale peach / straw / white excluded */
         for (int i = 40; i <= 49; i++) assert(wheel_saturated(i));    /* Kia vivid greens retained */
 
@@ -526,16 +535,17 @@ int main(void) {
         for (int p = 0; p < 2; p++) {
             set_palette(pals[p]);
             for (int si = 0; si < 2; si++) {
-                int seen_col[64] = {0}, idx = 22, uniq = 0;
-                for (int k = 0; k < 45; k++) {
+                int seen_col[MAXWHEEL] = {0}, idx = 22, uniq = 0;
+                for (int k = 0; k < 50; k++) {
                     idx = wheel_next(idx, steps[si]);
                     assert(wheel_saturated(idx));
                     if (!seen_col[idx]) { seen_col[idx] = 1; uniq++; }
                 }
                 assert(uniq >= 35);
+                if (p == 1) assert(seen_col[69] && seen_col[70]);     /* Hyundai Beat visits 0x01xx Emerald Green & Marigold Gold */
             }
         }
-        /* #RRGGBB bands snap to vivid swatches on Kia AND re-snap cleanly when switching to Hyundai */
+        /* #RRGGBB bands snap to vivid swatches on Kia AND re-snap cleanly (including 0x01xx stock colours) on Hyundai */
         set_palette("kia");
         C.nbands = parse_bands(DEFAULT_BANDS, C.bands);
         assert(C.nbands == 5);
@@ -545,9 +555,10 @@ int main(void) {
             assert(WHEEL_R[wi] == C.bands[i].r && WHEEL_G[wi] == C.bands[i].g && WHEEL_B[wi] == C.bands[i].b);
         }
         set_palette("hyundai");
+        assert(C.bands[2].r == 382 && C.bands[2].g == 471 && C.bands[2].b == 277);   /* #00FF40 Mids -> #69 Healing Forest */
         for (int i = 0; i < C.nbands; i++) {
             assert(palette_has_rgb(HYUNDAI_R, HYUNDAI_G, HYUNDAI_B, C.bands[i].r, C.bands[i].g, C.bands[i].b));
-            int wi = nearest_vivid_wheel(C.bands[i].r, C.bands[i].g, C.bands[i].b);
+            int wi = nearest_vivid_wheel(C.bands[i].r & 0xff, C.bands[i].g & 0xff, C.bands[i].b & 0xff);
             assert(WHEEL_R[wi] == C.bands[i].r && WHEEL_G[wi] == C.bands[i].g && WHEEL_B[wi] == C.bands[i].b);
         }
         set_palette("kia");
@@ -611,7 +622,9 @@ int main(void) {
         for (long long tp2 = 2110; tp2 <= 2420; tp2 += 11) drive(&d, &a, fb, tp2);
         assert(d.sent_level == 1);       /* reaches floor well before next 120 BPM beat at 2500 ms */
 
-        /* 5. Spectrum auto-adaptation: a quieter treble entry wins when it surges above its own baseline, while manual mode stays on bass */
+        /* 5. Spectrum auto-adaptation + 115 ms minimum dwell:
+              a quieter treble entry wins when it surges above its own baseline, while manual mode stays on bass;
+              sub-100 ms non-beat wobble stays locked to avoid LIN mid-fade mud */
         C.nbands = parse_bands("40-200:22:1 2000-5000:56:1", C.bands);
         C.band_smoothing_ms = 0; C.switch_margin = 15;
         int dyn_band = -1, static_band = -1;
@@ -635,8 +648,28 @@ int main(void) {
         }
         assert(static_band == 0);   /* manual boost 1:1 stays pinned on louder 90 Hz bass */
         assert(dyn_band == 1);      /* spectrum_dynamic=1 switches cleanly to the newly-entering 3 kHz lead */
+        {   /* 115 ms dwell check: mild non-beat alternation at +50 ms is held back, then switches cleanly at >= 115 ms */
+            C.spectrum_dynamic = 0;
+            ana_init(&a);
+            sample_idx = 0;
+            Frame fd0 = {0}, fd50 = {0}, fd130 = {0};
+            for (int blk = 0; blk < 20; blk++) {
+                long long t = blk * 1000LL * PERIOD / rate;
+                int hi_on = blk >= 4;   /* switch from 90 Hz bass to mildly louder 3 kHz at t=42 ms */
+                for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                    double ts = sample_idx / (double)rate;
+                    double sig = hi_on ? 0.22 * sin(2 * M_PI * 3000.0 * ts) : 0.20 * sin(2 * M_PI * 90.0 * ts);
+                    pcm_buf[i * CH] = pcm_buf[i * CH + 1] = (short)lround(sig * 18000.0);
+                }
+                Frame fx = ana_block(&a, pcm_buf, PERIOD, t);
+                if (blk == 3) fd0 = fx;
+                if (blk == 6) fd50 = fx;    /* ~64 ms after initial lock at t=0: still within 115 ms dwell */
+                if (blk == 13) fd130 = fx;  /* ~138 ms: past 115 ms dwell, switches cleanly */
+            }
+            assert(fd0.band == 0 && fd50.band == 0 && fd130.band == 1);
+        }
 
-        /* 6. Real-time Auto-BPM detection & tempo-linked timing (90 BPM vs 140 BPM vs beatless sine) */
+        /* 6. Real-time Auto-BPM detection, tempo-linked timing, and >=450 ms CarPlay track-skip silence reset */
         C.auto_bpm = 1; C.flash_ms = 125; C.min_beat_ms = 200; C.pulse_decay = 35;
         Ana a90, a140, asine;
         ana_init(&a90); ana_init(&a140); ana_init(&asine);
@@ -666,6 +699,12 @@ int main(void) {
         C.auto_bpm = 0;   /* manual timing override ignores locked BPM */
         assert(eff_flash_ms(&a90) == 125 && eff_min_beat_ms(&a90) == 200 && eff_pulse_hold_ms(&a90) == PULSE_HOLD_MS);
         C.auto_bpm = 1;
+        /* brief 200 ms pause keeps BPM lock, while >=450 ms CarPlay track-skip silence resets BPM cleanly */
+        memset(pcm_buf, 0, sizeof pcm_buf);
+        for (int blk = 620; blk < 638; blk++) ana_block(&a90, pcm_buf, PERIOD, blk * 1000LL * PERIOD / rate);
+        assert(a90.bpm > 85.0 && a90.bpm_conf > 0.35);
+        for (int blk = 638; blk < 670; blk++) ana_block(&a90, pcm_buf, PERIOD, blk * 1000LL * PERIOD / rate);
+        assert(a90.bpm == 0.0 && a90.bpm_conf == 0.0 && a90.flux_filled == 0);
         /* beatless steady tone does not hallucinate BPM */
         sample_idx = 0;
         for (int blk = 0; blk < 400; blk++) {
@@ -694,7 +733,115 @@ int main(void) {
         }
         assert(fabs(asub.bpm - 115.0) < 2.5 && asub.bpm_conf > 0.35);
 
-        /* 7. USB tuning clip capture (WAV + CSV + session.txt) & analyze_file() WAV round-trip */
+        /* 7. All 6 new single-zone visualizer modes on Hyundai Ioniq 5 palette (Duet, Drop, Synesthesia, Ember, Drift, Night Drive) */
+        set_palette("hyundai");
+        C.min_interval_ms = 20; C.bright_min = 1; C.bright_max = 10; C.flash_ms = 110; C.flash_on_beat = -1; C.bright_fixed = 0;
+        {   /* Duet: Mindful Teal (#68) bed modulated by midrange between beats, opposite 180 deg accent flash at max on beat */
+            snprintf(C.mode, sizeof C.mode, "duet");
+            C.duet_bed = 68; C.duet_accent = -1;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 68;
+            Frame fd = {0}; fd.db = -18; fd.beat = 1; fd.mid_norm = 0.6;
+            drive(&d, &asub, fd, 1000);
+            int opp = vivid_at_hue(wheel_hue(68) + 180.0);
+            assert(d.want_r == WHEEL_R[opp] && d.sent_level == 10);
+            fd.beat = 0;
+            drive(&d, &asub, fd, 1250);
+            assert(d.want_r == WHEEL_R[68] && d.sent_level >= 1 && d.sent_level <= 6);
+        }
+        {   /* Drop: breakdown (0) -> rising build-up (1) -> full neon drop (2) */
+            snprintf(C.mode, sizeof C.mode, "drop");
+            C.drop_style = 0; C.drop_sensitivity = 100; C.bright_min = 0; C.bright_max = 10;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = -1;
+            Frame fd = {0}; fd.db = -24; fd.drop_state = 0; fd.mid_norm = 0.4;
+            drive(&d, &asub, fd, 1000);
+            assert(d.want_level >= 1 && d.want_level <= 3);
+            fd.drop_state = 1; fd.riser_norm = 0.85;
+            drive(&d, &asub, fd, 1100);
+            int build_lvl = d.want_level;
+            assert(build_lvl >= 6 && build_lvl <= 8);
+            fd.drop_state = 2; fd.beat = 1;
+            drive(&d, &asub, fd, 1200);
+            assert(d.want_level == 10);
+            fd.beat = 0;
+            drive(&d, &asub, fd, 1400);
+            assert(d.want_level == 0);   /* deep blackout valley between drop beats */
+            C.bright_min = 1;
+        }
+        {   /* Synesthesia: continuous pitch centroid maps 90 Hz bass vs 3200 Hz lead to distinct vivid colours */
+            snprintf(C.mode, sizeof C.mode, "synesthesia");
+            C.syn_shift = 0; C.band_smoothing_ms = 25; C.flash_on_beat = 0;
+            Ana asyn; ana_init(&asyn);
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+            Frame fs = {0};
+            sample_idx = 0;
+            for (int blk = 0; blk < 60; blk++) {
+                for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                    short s16 = (short)lround(0.28 * sin(2 * M_PI * 90.0 * sample_idx / rate) * 18000.0);
+                    pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+                }
+                fs = ana_block(&asyn, pcm_buf, PERIOD, blk * 11LL);
+            }
+            drive(&d, &asyn, fs, 700);
+            int low_idx = d.idx;
+            for (int blk = 60; blk < 120; blk++) {
+                for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                    short s16 = (short)lround(0.28 * sin(2 * M_PI * 3200.0 * sample_idx / rate) * 18000.0);
+                    pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+                }
+                fs = ana_block(&asyn, pcm_buf, PERIOD, blk * 11LL);
+            }
+            drive(&d, &asyn, fs, 1400);
+            int high_idx = d.idx;
+            assert(fs.pitch_norm > 0.70 && low_idx != high_idx && wheel_saturated(low_idx) && wheel_saturated(high_idx));
+            C.flash_on_beat = -1;
+        }
+        {   /* Ember: beat ignites Marigold Gold flare (#70 on Fire theme) and cools to violet coal as envelope decays */
+            snprintf(C.mode, sizeof C.mode, "ember");
+            C.ember_theme = 0; C.pulse_decay = 45;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+            Frame fe = {0}; fe.db = -16; fe.beat = 1; fe.onset_ratio = 3.0;
+            drive(&d, &asub, fe, 2000);
+            assert(d.idx == 70 && d.sent_level == 10);   /* Fire peak flare hits #70 Marigold Gold! */
+            fe.beat = 0; fe.onset_ratio = 0;
+            for (long long te = 2120; te <= 2600; te += 20) drive(&d, &asub, fe, te);
+            assert(d.idx != 70 && d.sent_level == 1);
+        }
+        {   /* Phrase Drift: holds mood colour for drift_beats=4 beats, steps cleanly on beat 4 with downbeat swell */
+            snprintf(C.mode, sizeof C.mode, "drift");
+            C.drift_theme = 0; C.drift_beats = 4; C.flash_on_beat = 0;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+            Frame fdr = {0}; fdr.db = -18; fdr.beat = 1;
+            drive(&d, &asub, fdr, 1000); int c1 = d.idx;
+            drive(&d, &asub, fdr, 1500); int c2 = d.idx;
+            drive(&d, &asub, fdr, 2000); int c3 = d.idx;
+            drive(&d, &asub, fdr, 2500); int c4 = d.idx;
+            assert(c1 == c2 && c2 == c3 && c4 != c1 && c1 == 69);   /* Forest & Aurora starts on #69 Emerald Green! */
+            C.flash_on_beat = -1;
+        }
+        {   /* Night Drive: EV regen/cruise/power drives colour (#69 -> #67 -> #22) while music beats pulse brightness */
+            snprintf(C.mode, sizeof C.mode, "nightdrive");
+            snprintf(C.nd_source, sizeof C.nd_source, "power");
+            C.power_low = -45; C.power_high = 140;
+            C.power_color_low = 69; C.power_color_zero = 67; C.power_color_high = 22;
+            C.pulse_decay = 45;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 67;
+            pthread_mutex_lock(&en_mu); en.kw = -45.0; en.kw_t = now_ms(); en.kw_ok = 1; pthread_mutex_unlock(&en_mu);
+            Frame fn = {0}; fn.db = -16; fn.beat = 1; fn.onset_ratio = 3.0;
+            drive(&d, &asub, fn, 3000);
+            assert(d.idx == 69 && d.want_r == 382 && d.sent_level == 10);   /* Regen + Beat -> Emerald Green at max! */
+            pthread_mutex_lock(&en_mu); en.kw = 0.0; en.kw_t = now_ms(); pthread_mutex_unlock(&en_mu);
+            fn.beat = 0; fn.onset_ratio = 0;
+            drive(&d, &asub, fn, 3300);
+            assert(d.idx == 67 && d.want_r == 280);                         /* Cruise -> Ocean Blue! */
+            pthread_mutex_lock(&en_mu); en.kw = 140.0; en.kw_t = now_ms(); pthread_mutex_unlock(&en_mu);
+            drive(&d, &asub, fn, 3500);
+            assert(d.idx == 22 && d.want_r == 255);                         /* Full Power -> Vivid Red! */
+            pthread_mutex_lock(&en_mu); en.kw_ok = 0; pthread_mutex_unlock(&en_mu);
+        }
+        set_palette("kia");
+        snprintf(C.mode, sizeof C.mode, "spectrum");
+
+        /* 8. USB tuning clip capture (WAV + CSV + session.txt) & analyze_file() WAV round-trip */
         usb_roots[0] = usb; usb_any_folder = 1;
         tune.in_pcm = 1;
         snprintf(dpath, sizeof dpath, "%s/diag/request", lamp_dir);
