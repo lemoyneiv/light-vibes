@@ -50,7 +50,7 @@ echo "== settings app"
 A=build/app
 rm -rf $A
 mkdir -p $A/classes $A/dex $A/assets/presets
-for p in synesthesia phasepulse drift duet ember nightdrive lively intense pulse3 glow epic speed power efficiency; do cp presets/$p.conf $A/assets/presets/; done
+for p in synesthesia phasepulse drift duet ember nightdrive lively pulse3 epic glow speed power efficiency; do cp presets/$p.conf $A/assets/presets/; done
 javac --release 8 -nowarn -Xlint:-options -cp "$ANDROID_JAR" -d $A/classes app/src/lightvibes/app/*.java
 "$BT/d8" --release --min-api 19 --lib "$ANDROID_JAR" --output $A/dex $(find $A/classes -name '*.class')
 "$BT/aapt" package -f -M app/AndroidManifest.xml -S app/res -A $A/assets -I "$ANDROID_JAR" -F $A/unsigned.apk

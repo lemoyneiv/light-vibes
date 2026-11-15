@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FF40:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
     private static final String[] BUILT_IN = {
         "synesthesia", "phasepulse", "drift", "duet", "ember", "nightdrive",
-        "lively", "intense", "pulse3", "glow", "epic",
+        "lively", "pulse3", "epic", "glow",
         "speed", "power", "efficiency"
     };
     private static final String FIRST_RUN_PRESET = "b:synesthesia";
@@ -1431,7 +1431,7 @@ public class MainActivity extends Activity {
 
     private static String shippedForMode(String m) {
         if ("spectrum".equals(m)) return "lively";
-        if ("beat".equals(m)) return "intense";
+        if ("beat".equals(m)) return "epic";
         if ("pulse".equals(m)) return "glow";
         if ("drift".equals(m)) return "phasepulse";
         return m;

@@ -21,9 +21,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.6-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.7-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.6.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.7.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -32,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.6-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.7-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -54,7 +54,7 @@ The Material Design 3 split-pane interface adapts automatically to the head unit
 
 - **Master switch** at the top of the left preset rail switches the effect on or off without uninstalling the mod, alongside **+** (new preset) and **⋮** (lamp diagnostics, feedback, and preset reset/restore).
 - **Presets:** Synesthesia (the default), Phase Pulse, Phase Drift, Duet, Ember, Night Drive, Lively,
-  Intense, Bold Flash, Glow, Epic, Speed, Power and Efficiency—each with a live color badge. Tap one to use it. If you switch presets
+  Bold Flash, Epic, Glow, Speed, Power and Efficiency—each with a live color badge. Tap one to use it. If you switch presets
   with unsaved changes, the app asks whether to save them, save them as a new preset, or discard them.
 - **Single-row header bar:** tap the **Mode** chip to open the categorized **Music Modes** / **Hybrid & Driving** mode sheet, or switch between the **Color**, **Brightness** and **Tuning** segmented tabs.
 
