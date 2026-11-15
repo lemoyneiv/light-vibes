@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     private static int[] WHEEL_R = KIA_R, WHEEL_G = KIA_G, WHEEL_B = KIA_B;
 
     private static final String DEFAULT_BANDS = "30-150:22:1 150-500:28:2 500-2000:44:4 2000-6000:56:10 6000-16000:8:30";
-    private static final String[] BUILT_IN = {"lively", "marigold", "contrast", "pulse3", "glow", "epic", "speed", "power", "efficiency"};
+    private static final String[] BUILT_IN = {"lively", "intense", "marigold", "contrast", "pulse3", "glow", "epic", "speed", "power", "efficiency"};
     private static final String FIRST_RUN_PRESET = "b:lively";
     private static final int MAX_BANDS = 8;      // what fits on screen; lightvibesd takes up to 12
     private static final int MIN_SPLIT_HZ = 60;  // each half keeps at least one FFT bin (23.4 Hz each)
@@ -1112,7 +1112,7 @@ public class MainActivity extends Activity {
     }
 
     private void addStepSlider() {
-        int step = intOf(cfg.get("beat_step"), 5);
+        int step = intOf(cfg.get("beat_step"), 19);
         final TextView label = text("Color step: " + step, 16, TEXT);
         RangeSlider bar = level(1, 32, 1, step);
         bar.setListener(new RangeSlider.Listener() {
@@ -1122,18 +1122,27 @@ public class MainActivity extends Activity {
         editor.addView(sliderRow(label, 140, bar, null, null));
     }
 
-    /** The music modes' brightness range, in one row like the other modes' brightness, with Flash on Beat where it applies. Levels 1-10, as in the car's own menu (0 would turn the lamp off). */
+    private static String brightLabel(int lo, int hi) {
+        return "Brightness Range: " + (lo == 0 ? "0 (off)" : String.valueOf(lo)) + " to " + hi;
+    }
+
+    /** The music modes' brightness range, in one row like the other modes' brightness, with Flash on Beat where it applies. Levels 0-10 (0 turns the lamp off between beats; 1-10 match the car's menu). */
     private void addBrightness() {
-        final int low = Math.max(1, Math.min(10, intOf(cfg.get("brightness_min"), 3)));
-        final int high = Math.max(low, Math.min(10, intOf(cfg.get("brightness_max"), 10)));
-        final TextView label = text("Brightness Range: " + low + " to " + high, 16, TEXT);
-        RangeSlider range = new RangeSlider(this, 1, 10, 1, low, high, TRACK, ACCENT, TEXT).gap(0);
+        final int low = Math.max(0, Math.min(10, intOf(cfg.get("brightness_min"), 1)));
+        final int high = Math.max(Math.max(1, low), Math.min(10, intOf(cfg.get("brightness_max"), 10)));
+        final TextView label = text(brightLabel(low, high), 16, TEXT);
+        RangeSlider range = new RangeSlider(this, 0, 10, 1, low, high, TRACK, ACCENT, TEXT).gap(0);
         range.setListener(new RangeSlider.Listener() {
-            @Override public void moved(int lo, int hi) { label.setText("Brightness Range: " + lo + " to " + hi); }
+            @Override public void moved(int lo, int hi) {
+                int h = Math.max(1, hi);
+                label.setText(brightLabel(Math.min(lo, h), h));
+            }
             @Override public void done(int lo, int hi) {
-                cfg.put("brightness_max", String.valueOf(hi));
+                int h = Math.max(1, hi), l = Math.min(lo, h);
+                cfg.put("brightness_max", String.valueOf(h));
                 writeFile(new File(settingsDir, "brightness_max"), cfg.get("brightness_max"));
-                set("brightness_min", String.valueOf(lo));
+                set("brightness_min", String.valueOf(l));
+                if (hi < 1) refreshEditor();
             }
         });
         // every mode has the car's own "dimmed in dark" at the end of its brightness row (Spectrum/Beat choose flashing above)
@@ -1143,7 +1152,7 @@ public class MainActivity extends Activity {
         sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override public void onCheckedChanged(CompoundButton b, boolean checked) { set("gauge_dim", checked ? "1" : "0"); }
         });
-        editor.addView(sliderRow(label, 230, range, "Dimmed in Dark", sw));
+        editor.addView(sliderRow(label, 245, range, "Dimmed in Dark", sw));
     }
 
     // ---------- response page: the same settings the presets were tuned with ----------
@@ -1462,8 +1471,8 @@ public class MainActivity extends Activity {
         String[] names = titlesOf(bands);
         for (int i = 0; i < colours.length; i++) colours[i] = bands.get(i).rgb();
         String mode = mode();
-        meter.configure(mode.equals("spectrum"), beatsMatter(), !mode.equals("pulse") && !fixedLevel(), colours, names,
-                intOf(cfg.get("switch_margin"), 30), intOf(cfg.get("sensitivity"), 150), intOf(cfg.get("loudness_range_db"), 12));
+        meter.configure(mode.equals("spectrum"), beatsMatter(), !mode.equals("pulse") && !fixedLevel() && !flashing(), colours, names,
+                intOf(cfg.get("switch_margin"), 15), intOf(cfg.get("sensitivity"), 150), intOf(cfg.get("loudness_range_db"), 6));
     }
 
     /** The meter only reads from lightvibesd while the Response page is on screen. */
@@ -1512,12 +1521,12 @@ public class MainActivity extends Activity {
         boolean spectrum = mode.equals("spectrum"), pulse = mode.equals("pulse");
         List<View> tiles = new ArrayList<View>();
         if (spectrum) {
-            tiles.add(slider("Colour smoothing", "Lower reacts faster, higher is calmer", "band_smoothing_ms", 120, 0, 600, 10, " ms"));
-            tiles.add(slider("Colour stickiness", "How much louder a new band must get (marker line)", "switch_margin", 30, 0, 200, 5, "%"));
+            tiles.add(slider("Colour smoothing", "Lower reacts faster, higher is calmer", "band_smoothing_ms", 20, 0, 600, 10, " ms"));
+            tiles.add(slider("Colour stickiness", "How much louder a new band must get (marker line)", "switch_margin", 15, 0, 200, 5, "%"));
         }
-        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 100, 50, 1000, 10, " ms"));
-        // only what has an effect with the other settings: loudness moves the brightness only when it follows the music
-        if (!pulse && !fixedLevel()) tiles.add(slider("Brightness swing", "Lower makes brightness more dramatic", "loudness_range_db", 12, 3, 24, 1, " dB"));
+        tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 50, 20, 1000, 10, " ms"));
+        // only what has an effect with the other settings: loudness moves the brightness only when Average loudness is active
+        if (!pulse && !fixedLevel() && !flashing()) tiles.add(slider("Brightness swing", "Lower makes brightness more dramatic", "loudness_range_db", 6, 2, 24, 1, " dB"));
         addSection("Light");
         addGrid(tiles);
 
@@ -1525,6 +1534,8 @@ public class MainActivity extends Activity {
             List<Band> bands = bands();
             if (selectedBand >= bands.size()) selectedBand = 0;
             addSection("Band sensitivity");
+            boolean autoAdapt = !"0".equals(cfg.get("spectrum_dynamic"));
+            addRadios(2200, new String[][] {{"1", "Auto-adapt"}, {"0", "Manual only"}}, autoAdapt ? "1" : "0", "spectrum_dynamic");
             addBandChips(bands, 10, false);
             if (!bands.isEmpty()) editor.addView(boostSlider(bands));
         }
@@ -1532,10 +1543,10 @@ public class MainActivity extends Activity {
         if (beatsMatter()) {      // Spectrum only uses beats for flashes
             tiles = new ArrayList<View>();
             tiles.add(slider("Beat sensitivity", "Lower catches more beats (marker line)", "sensitivity", 150, 105, 500, 5, "%"));
-            tiles.add(slider("Shortest beat gap", "Ignores beats closer together", "min_beat_ms", 300, 100, 1000, 10, " ms"));
+            tiles.add(slider("Shortest beat gap", "Ignores beats closer together", "min_beat_ms", 200, 60, 1000, 10, " ms"));
             tiles.add(slider("Beat average", "Shorter adapts to build-ups faster", "beat_avg_ms", 1500, 200, 5000, 100, " ms"));
-            if (pulse) tiles.add(slider("Glow", "Higher fades more slowly", "pulse_decay", 60, 0, 99, 1, "%"));
-            else if (flashing()) tiles.add(slider("Flash length", "How long each flash holds", "flash_ms", 350, 50, 1000, 10, " ms"));
+            if (pulse) tiles.add(slider("Glow", "Higher fades more slowly", "pulse_decay", 35, 0, 99, 1, "%"));
+            else if (flashing()) tiles.add(slider("Flash length", "How long each flash holds", "flash_ms", 90, 30, 1000, 10, " ms"));
             tiles.add(beatRange());
             addSection("Beat detection");
             addGrid(tiles);
@@ -1618,7 +1629,7 @@ public class MainActivity extends Activity {
     /** The beat range as one two-handle slider, like Speed's range. */
     private View beatRange() {
         int lo = Math.max(20, Math.min(480, intOf(cfg.get("beat_low_hz"), 40)));
-        int hi = Math.max(lo + 20, Math.min(500, intOf(cfg.get("beat_high_hz"), 150)));
+        int hi = Math.max(lo + 20, Math.min(500, intOf(cfg.get("beat_high_hz"), 180)));
         final TextView value = text(lo + " to " + hi + " Hz", 20, TEXT);
         RangeSlider bar = new RangeSlider(this, 20, 500, 5, lo, hi, TRACK, ACCENT, TEXT).gap(4);
         bar.setListener(new RangeSlider.Listener() {
@@ -1629,7 +1640,7 @@ public class MainActivity extends Activity {
                 set("beat_low_hz", String.valueOf(a));
             }
         });
-        return tile("Beat range", value, "Kick and bass to 150 Hz, snare to 400", bar);
+        return tile("Beat range", value, "Kick and bass to 180 Hz, snare to 400", bar);
     }
 
     /** A band's boost, ×0.1 to ×100 on a log scale: it multiplies that band's energy before the bands compete. */

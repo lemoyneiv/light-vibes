@@ -55,7 +55,7 @@ Every change applies right away.
 The app follows the head unit's light and dark themes.
 
 - **On/Off** switches the effect off without uninstalling the mod.
-- **Presets:** Lively (the default), Marigold, Contrast, Bold Flash, Glow, Epic, Speed, Power and
+- **Presets:** Lively (the default), Intense, Marigold, Contrast, Bold Flash, Glow, Epic, Speed, Power and
   Efficiency. Tap one to use it. If you switch presets with unsaved changes, the app asks whether to
   save them, save them as a new preset, or discard them.
 - **Tabs:** every mode has **Color**, **Brightness** and **Tuning** tabs.
@@ -70,12 +70,14 @@ The app follows the head unit's light and dark themes.
   colours, which change live as you switch Eco, Normal and Sport. Picking Drive Mode turns on the car's
   **Link to Drive Mode** setting, and picking any other colour turns it off, so the colour shows.
   **Set as ambient light color** also makes the picked colour your car's own ambient colour.
-- **Brightness:** **Follow the music** sets a range the brightness moves within, either with the
-  **Average loudness** or with a **Flash on beat**. **Fixed level** keeps one brightness.
-  **Dimmed in Dark** is the car's own setting, on every mode.
-- **Tuning:** how quickly colours change, how easily they switch, each band's sensitivity, and how
-  beats are detected. The live meter at the top shows each band's level, what a band or beat has to
-  reach (the marker lines), and where the brightness sits in its range.
+- **Brightness:** **Follow the music** sets a range (`0` to `10`, where `0` turns the lamp completely off
+  between hits for full strobe contrast) that the brightness moves within, either with the **Average
+  loudness** or with a crisp **Flash on beat**. **Fixed level** keeps one brightness. **Dimmed in Dark**
+  is the car's own setting, on every mode.
+- **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
+  **Manual only** band sensitivity in Spectrum, and how beats are detected. The live meter at the top
+  shows each band's level, what a band or beat has to reach (the marker lines), and where the brightness
+  sits in its range.
 
 ### Driving modes
 
@@ -180,7 +182,8 @@ in a `Light Vibes reports` folder that you can attach. Over ADB it's at `/data/h
   `palette` setting file). Custom colours are ignored while drive-mode colour is on, so the service turns
   it off while it drives the lamp and restores it afterwards. Commands go through a persistent helper
   (`LampHelper`, run with `app_process`) that keeps the service's binder, falling back to `service call`.
-- **Analysis.** A 2048-point FFT every 512 samples (10.7 ms at 48 kHz), for beats, bands and loudness.
+- **Analysis.** Zero-lag time-domain bandpass onset detection plus a right-aligned 1024-sample Hann window
+  (2048-point FFT) every 512 samples (10.7 ms at 48 kHz), for beats, auto-adapting bands and loudness.
 - **Speed.** Every 500 ms the service asks HMG-API's vehicle service for `speed`, then walks around
   the colour wheel between your two colours, leaving out the pale ones.
 - **Settings.** The app writes one-value files in its own folder, and `lightvibesd` applies them

@@ -120,6 +120,7 @@ static struct {
     int pulse_set_car;          /* pulse: also make pulse_color the car's ambient colour (it stays after the music) */
     int switch_margin;          /* spectrum: percent a new band must beat the current one by */
     int band_smoothing_ms;
+    int spectrum_dynamic;       /* spectrum: 1 = auto-adapt each band to its running baseline, 0 = fixed boosts only */
     Band bands[MAXBANDS]; int nbands;
     char bands_text[256];
     int silence_db, idle_seconds;
@@ -254,7 +255,7 @@ static void load_config(const char *dir) {
     C.enabled = cfg_int("enabled", 1);
     C.debug = cfg_int("debug", 0);
     cfg_str("mode", C.mode, sizeof C.mode, repo ? "spectrum" : "beat");
-    C.min_interval_ms = clampi(cfg_int("min_interval_ms", 100), 50, 5000);
+    C.min_interval_ms = clampi(cfg_int("min_interval_ms", repo ? 100 : 50), 20, 5000);
     C.speed_low = clampi(cfg_int("speed_low", 0), 0, 300);
     C.speed_high = clampi(cfg_int("speed_high", 80), 0, 300);
     C.speed_color_low = clampi(cfg_int("speed_color_low", 44), 0, 63);
@@ -274,24 +275,25 @@ static void load_config(const char *dir) {
     C.gauge_dim = cfg_int("gauge_dim", 0) ? 1 : 0;
     if (!strcmp(C.gauge_bright, "auto")) { snprintf(C.gauge_bright, sizeof C.gauge_bright, "10"); C.gauge_dim = 1; }
     cfg_str("eff_source", C.eff_source, sizeof C.eff_source, "average");
-    C.bright_min = clampi(cfg_int("brightness_min", repo ? 1 : 3), 0, 10);
+    C.bright_min = clampi(cfg_int("brightness_min", 1), 0, 10);
     C.bright_max = clampi(cfg_int("brightness_max", 10), 0, 10);
     if (C.bright_max < C.bright_min) C.bright_max = C.bright_min;
-    C.loudness_range_db = clampi(cfg_int("loudness_range_db", 12), 3, 40);
+    C.loudness_range_db = clampi(cfg_int("loudness_range_db", 6), 2, 40);
     C.sensitivity = clampi(cfg_int("sensitivity", 150), 105, 500);
     C.beat_low_hz = clampi(cfg_int("beat_low_hz", 40), 20, 20000);
-    C.beat_high_hz = clampi(cfg_int("beat_high_hz", 150), C.beat_low_hz + 20, 22000);
+    C.beat_high_hz = clampi(cfg_int("beat_high_hz", 180), C.beat_low_hz + 20, 22000);
     C.beat_avg_ms = clampi(cfg_int("beat_avg_ms", 1500), 200, 10000);
-    C.min_beat_ms = clampi(cfg_int("min_beat_ms", 300), 100, 3000);
+    C.min_beat_ms = clampi(cfg_int("min_beat_ms", 200), 60, 3000);
     C.flash_on_beat = cfg_int("flash_on_beat", repo ? 0 : -1);   /* -1 = mode default */
-    C.flash_ms = clampi(cfg_int("flash_ms", 350), 0, 2000);
-    C.beat_step = clampi(cfg_int("beat_step", 5), 1, 32);
+    C.flash_ms = clampi(cfg_int("flash_ms", 90), 0, 2000);
+    C.beat_step = clampi(cfg_int("beat_step", 19), 1, 32);
     C.skip_white = cfg_int("skip_white", 1);
-    C.pulse_decay = clampi(cfg_int("pulse_decay", 60), 0, 99);
+    C.pulse_decay = clampi(cfg_int("pulse_decay", 35), 0, 99);
     C.pulse_color = clampi(cfg_int("pulse_color", -1), -2, 63);   /* -1 the car's own colour, -2 the drive-mode colour */
     C.pulse_set_car = cfg_int("pulse_set_car", 0) ? 1 : 0;
-    C.switch_margin = clampi(cfg_int("switch_margin", 30), 0, 500);
-    C.band_smoothing_ms = clampi(cfg_int("band_smoothing_ms", repo ? 128 : 120), 0, 3000);
+    C.switch_margin = clampi(cfg_int("switch_margin", 15), 0, 500);
+    C.band_smoothing_ms = clampi(cfg_int("band_smoothing_ms", repo ? 128 : 20), 0, 3000);
+    C.spectrum_dynamic = cfg_int("spectrum_dynamic", repo ? 0 : 1) ? 1 : 0;
     cfg_str("brightness_curve", C.bright_curve, sizeof C.bright_curve, repo ? "repo" : "range");
     cfg_str("bands", C.bands_text, sizeof C.bands_text, repo ? REPO_BANDS : DEFAULT_BANDS);
     C.nbands = parse_bands(C.bands_text, C.bands);
@@ -401,9 +403,9 @@ static long long now_ms(void) {
 }
 static void show_config(void) {
     say("settings: palette=%s (%s) preset=%s brightness_curve=%s", active_palette, C.palette, C.preset, C.bright_curve);
-    say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms step=%d | pulse_decay=%d | spectrum margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
+    say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms step=%d | pulse_decay=%d | spectrum dynamic=%d margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
         C.mode, C.bright_min, C.bright_max, C.loudness_range_db, C.beat_low_hz, C.beat_high_hz, C.sensitivity, C.beat_avg_ms,
-        C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.switch_margin, C.band_smoothing_ms, C.bands_text,
+        C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
         C.min_interval_ms, C.idle_seconds, C.silence_db, C.override_drive_mode);
     if (!strcmp(C.mode, "speed")) say("settings: speed %d %s = colour #%d, %d %s = colour #%d", C.speed_low, C.speed_unit, C.speed_color_low, C.speed_high, C.speed_unit, C.speed_color_high);
     if (!strcmp(C.mode, "power")) say("settings: power %d kW = colour #%d, 0 kW = colour #%d, %d kW = colour #%d", C.power_low, C.power_color_low, C.power_color_zero, C.power_high, C.power_color_high);
@@ -972,25 +974,30 @@ static int music_rate(void) {
     return file_has(hw, "rate: 48000") ? 48000 : file_has(hw, "rate: 44100") ? 44100 : 0;
 }
 
-/* ---------- FFT analysis ---------- */
+/* ---------- FFT & transient analysis ---------- */
+#define NWIN 1024                /* right-aligned 21.3 ms Hann window zero-padded into 2048-pt FFT: halves spectral lag */
 typedef struct {
     float ring[NFFT]; int filled;
-    float win[NFFT], re[NFFT], im[NFFT];
-    double beat_fast, beat_slow;
-    double band_e[MAXBANDS];
+    float win[NWIN], re[NFFT], im[NFFT];
+    double bp_hp_x1, bp_hp_y1;   /* causal time-domain beat bandpass: zero window lag on drum transients */
+    double bp_lp1, bp_lp2;
+    double beat_prev, beat_env, beat_fast, beat_slow, beat_ref_floor;
+    int beat_armed;
+    double band_e[MAXBANDS], band_ref[MAXBANDS], band_score[MAXBANDS];
     double loud_ref_db;
     double rep_ref;             /* repo curve: running loudness reference (linear, 16-bit units) */
     long long last_beat;
     int sel_band;
 } Ana;
 
-typedef struct { double db; int beat; int band; double beat_ratio; double band_db[MAXBANDS]; } Frame;
+typedef struct { double db; int beat; int band; double beat_ratio; double onset_ratio; double band_db[MAXBANDS]; } Frame;
 
 static void ana_init(Ana *a) {
     memset(a, 0, sizeof *a);
-    for (int i = 0; i < NFFT; i++) a->win[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * i / (NFFT - 1));
+    for (int i = 0; i < NWIN; i++) a->win[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * i / (NWIN - 1));
     a->sel_band = -1;
     a->last_beat = -100000;
+    a->beat_armed = 1;
     a->loud_ref_db = -30;
     a->rep_ref = 50;
 }
@@ -1019,49 +1026,102 @@ static double band_energy(const float *re, const float *im, int lo_hz, int hi_hz
     if (lo < 1) lo = 1;
     if (hi > NFFT / 2 - 1) hi = NFFT / 2 - 1;
     double e = 0; for (int k = lo; k <= hi; k++) e += (double)re[k] * re[k] + (double)im[k] * im[k];
-    return e / ((double)NFFT * NFFT);
+    return e / ((double)NWIN * NWIN);
 }
 static double db10(double e) { return e > 1e-14 ? 10 * log10(e) : -140; }
 
 static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     Frame f; memset(&f, 0, sizeof f); f.band = a->sel_band;
-    /* slide the mono ring buffer */
+    /* slide the mono ring buffer and filter newest samples directly for zero-lag beat onset */
     memmove(a->ring, a->ring + frames, sizeof(float) * (NFFT - frames));
-    double et = 0;
+    double dt = 1.0 / rate;
+    double rc_hp = 1.0 / (2.0 * M_PI * C.beat_low_hz);
+    double a_hp = rc_hp / (rc_hp + dt);
+    double wc_lp = 2.0 * M_PI * (C.beat_high_hz / 0.6436) * dt;
+    double a_lp = wc_lp / (1.0 + wc_lp);
+    double et = 0, eb_sum = 0;
     for (int i = 0; i < frames; i++) {
         float x = (buf[i * CH] + buf[i * CH + 1]) / 65536.0f;
-        a->ring[NFFT - frames + i] = x; et += (double)x * x;
+        a->ring[NFFT - frames + i] = x;
+        et += (double)x * x;
+        double hp = a_hp * (a->bp_hp_y1 + (double)x - a->bp_hp_x1);
+        a->bp_hp_x1 = x; a->bp_hp_y1 = hp;
+        a->bp_lp1 += a_lp * (hp - a->bp_lp1);
+        a->bp_lp2 += a_lp * (a->bp_lp1 - a->bp_lp2);
+        eb_sum += a->bp_lp2 * a->bp_lp2;
     }
     if (a->filled < NFFT) a->filled += frames;
     double rms = sqrt(et / frames);
     f.db = rms > 1e-9 ? 20 * log10(rms) : -120;
-    for (int i = 0; i < NFFT; i++) { a->re[i] = a->ring[i] * a->win[i]; a->im[i] = 0; }
+    memset(a->re, 0, sizeof(float) * (NFFT - NWIN));
+    for (int i = 0; i < NWIN; i++) a->re[NFFT - NWIN + i] = a->ring[NFFT - NWIN + i] * a->win[i];
+    memset(a->im, 0, sizeof a->im);
     fft(a->re, a->im);
 
-    /* beat: beat-band energy, short average vs long average */
-    double eb = band_energy(a->re, a->im, C.beat_low_hz, C.beat_high_hz);
-    a->beat_fast = eb > a->beat_fast ? eb : 0.5 * a->beat_fast + 0.5 * eb;   /* instant attack, smoothed release */
+    /* beat: zero-lag beat-band energy + onset flux vs spike-clamped running baseline + refractory tail rejection */
+    double eb = eb_sum / frames;
+    double env_prev = a->beat_env;
+    if (a->beat_env <= 0) a->beat_env = eb;
+    else a->beat_env += (BLOCK_MS / (BLOCK_MS + 35.0)) * (eb - a->beat_env);
+    double flux = eb > a->beat_prev ? eb - a->beat_prev : 0.0;
+    a->beat_prev = eb;
+    double accent = eb + 0.65 * flux;   /* sharp percussive attacks punch cleanly above sustained sub-bass */
+    a->beat_fast = accent > a->beat_fast ? accent : 0.45 * a->beat_fast + 0.55 * eb;
+    if (t - a->last_beat < 40) {
+        if (0.45 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.45 * eb;
+    } else {
+        a->beat_ref_floor *= exp(-BLOCK_MS / 145.0);
+    }
     double alpha_slow = BLOCK_MS / (double)C.beat_avg_ms;
     if (t < 1500) alpha_slow = alpha_slow * 4 > 0.5 ? 0.5 : alpha_slow * 4;   /* settle fast at start */
-    if (a->beat_slow <= 0) a->beat_slow = eb;
+    if (a->beat_slow <= 0) a->beat_slow = eb > 1e-12 ? eb : 1e-12;
+    if (eb <= 1.15 * a->beat_slow || (env_prev > 0 && eb > 1.65 * env_prev && flux > 0.35 * eb)) a->beat_armed = 1;
+    int rising = env_prev <= 1e-14 || eb > 1.18 * env_prev;
     f.beat_ratio = a->beat_slow > 1e-14 ? a->beat_fast / a->beat_slow : 0;
-    if (f.db > C.silence_db && f.beat_ratio * 100 > C.sensitivity && t - a->last_beat >= C.min_beat_ms) { f.beat = 1; a->last_beat = t; }
-    a->beat_slow += alpha_slow * (eb - a->beat_slow);
+    f.onset_ratio = (a->beat_slow > 1e-14 && eb > env_prev && accent > a->beat_ref_floor) ? (eb + 1.2 * flux) / a->beat_slow : 0;
+    if (f.db > C.silence_db && a->beat_armed && rising && accent > a->beat_ref_floor
+        && f.beat_ratio * 100 > C.sensitivity && t - a->last_beat >= C.min_beat_ms) {
+        f.beat = 1; a->last_beat = t; a->beat_armed = 0;
+        if (0.45 * eb > a->beat_ref_floor) a->beat_ref_floor = 0.45 * eb;
+    }
+    double eb_capped = eb > 4.0 * a->beat_slow ? 4.0 * a->beat_slow : eb;
+    a->beat_slow += alpha_slow * (eb_capped - a->beat_slow);
 
-    /* spectrum bands (smoothed, boosted); loudest wins, with a switching margin */
+    /* spectrum bands (smoothed, boosted, optionally auto-adapted per band); loudest wins with switching margin */
     double alpha_b = C.band_smoothing_ms > 0 ? BLOCK_MS / (BLOCK_MS + C.band_smoothing_ms) : 1.0;
-    int best = 0;
+    double alpha_ref = BLOCK_MS / 2500.0;
+    if (t < 1500) alpha_ref = alpha_ref * 4 > 0.4 ? 0.4 : alpha_ref * 4;
+    double mean_ref = 0;
     for (int i = 0; i < C.nbands; i++) {
         double e = band_energy(a->re, a->im, C.bands[i].lo, C.bands[i].hi) * C.bands[i].gain;
         a->band_e[i] += alpha_b * (e - a->band_e[i]);
-        f.band_db[i] = db10(a->band_e[i]);
-        if (a->band_e[i] > a->band_e[best]) best = i;
+        if (f.db > C.silence_db) {
+            if (a->band_ref[i] <= 0) a->band_ref[i] = e > 1e-12 ? e : 1e-12;
+            else {
+                double ec = e > 2.5 * a->band_ref[i] ? 2.5 * a->band_ref[i] : e;
+                a->band_ref[i] += alpha_ref * (ec - a->band_ref[i]);
+            }
+        }
+        mean_ref += a->band_ref[i];
+    }
+    if (C.nbands > 0) mean_ref /= C.nbands;
+    if (mean_ref < 1e-12) mean_ref = 1e-12;
+    int best = 0;
+    for (int i = 0; i < C.nbands; i++) {
+        double sc = a->band_e[i];
+        if (C.spectrum_dynamic) {
+            double r = a->band_ref[i] > 0.05 * mean_ref ? a->band_ref[i] : 0.05 * mean_ref;
+            sc = a->band_e[i] * pow(mean_ref / r, 0.80);   /* evens out spectral tilt while keeping user boost bias */
+        }
+        a->band_score[i] = sc;
+        f.band_db[i] = db10(sc);
+        if (sc > a->band_score[best]) best = i;
     }
     if (a->sel_band < 0 || a->sel_band >= C.nbands) a->sel_band = best;
-    else if (best != a->sel_band && a->band_e[best] > a->band_e[a->sel_band] * (1 + C.switch_margin / 100.0)) a->sel_band = best;
+    else if (best != a->sel_band && a->band_score[best] > a->band_score[a->sel_band] * (1 + C.switch_margin / 100.0)) a->sel_band = best;
     f.band = a->sel_band;
 
-    if (f.db > C.silence_db) a->loud_ref_db += (BLOCK_MS / 4000.0) * (f.db - a->loud_ref_db);
+    if (f.db > C.silence_db) a->loud_ref_db += (BLOCK_MS / 1800.0) * (f.db - a->loud_ref_db);
     {   /* repo: reference += 0.025 * (max(rms, 20) - reference) per 128 ms window */
         double r16 = rms * 32768.0, alpha = 0.025 * BLOCK_MS / 128.0;
         a->rep_ref += alpha * ((r16 > 20 ? r16 : 20) - a->rep_ref);
@@ -1069,8 +1129,8 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
     return f;
 }
 
-/* loudness -> UI brightness level (average loudness sits in the middle of the range) */
-static int loud_level(Ana *a, double db) {
+/* loudness -> UI brightness level (S-curve contrast with small hysteresis so single-step moves stay smooth) */
+static int loud_level(Ana *a, int cur_level, double db) {
     if (db <= C.silence_db) return C.bright_min;
     if (!strcmp(C.bright_curve, "repo")) {     /* level = round(4 + 3*log2(rms / reference)) */
         double r16 = pow(10, db / 20) * 32768.0, ref = a->rep_ref > 20 ? a->rep_ref : 20;
@@ -1080,7 +1140,13 @@ static int loud_level(Ana *a, double db) {
     double x = 0.5 + (db - a->loud_ref_db) / (2.0 * C.loudness_range_db);
     if (x < 0) x = 0;
     if (x > 1) x = 1;
-    return clampi((int)lround(C.bright_min + x * (C.bright_max - C.bright_min)), C.bright_min, C.bright_max);
+    x = x * x * (3.0 - 2.0 * x);
+    double target = C.bright_min + x * (C.bright_max - C.bright_min);
+    if (cur_level >= C.bright_min && cur_level <= C.bright_max && fabs(target - cur_level) < 0.65
+        && target > C.bright_min + 0.05 && target < C.bright_max - 0.05) {
+        return cur_level;
+    }
+    return clampi((int)lround(target), C.bright_min, C.bright_max);
 }
 
 /* ---------- light driver ---------- */
@@ -1089,7 +1155,7 @@ typedef struct {
     int sent_idx, sent_level;   /* sent_idx holds the packed RGB last sent */
     long long last_color, last_bright;
     double pulse;
-    long long flash_until;
+    long long flash_until, pulse_hold_until;
 } Drv;
 
 static int wheel_pale(int i) {   /* the pastel/white stretch of the wheel */
@@ -1097,41 +1163,54 @@ static int wheel_pale(int i) {   /* the pastel/white stretch of the wheel */
     if (WHEEL_B[i] < m) m = WHEEL_B[i];
     return m > 150;
 }
-static int wheel_ok(int i) { return !C.skip_white || !wheel_pale(i); }
+static int wheel_saturated(int i) {   /* stricter chroma check for Beat jumps so flashes never wash out pastel */
+    int m = WHEEL_R[i] < WHEEL_G[i] ? WHEEL_R[i] : WHEEL_G[i];
+    if (WHEEL_B[i] < m) m = WHEEL_B[i];
+    return m <= 115;
+}
+static int wheel_ok(int i) { return !C.skip_white || wheel_saturated(i); }
 static int wheel_next(int i, int step) {
-    for (int k = 0; k < 64; k++) { i = (i + step) % 64; if (wheel_ok(i)) return i; step = 1; }
+    if (step < 1) step = 1;
+    for (int k = 0; k < 64; k++) { i = (i + (k < 8 ? step : 1)) % 64; if (wheel_ok(i)) return i; }
     return i;
 }
 
-#define BEAT_GUARD_MS 40
+#define BEAT_GUARD_MS 25
+#define PULSE_HOLD_MS 55
 static void drive(Drv *d, Ana *a, Frame f, long long t) {
     int want_idx, want_level, wr = 0, wg = 0, wb = 0;
-    if (f.beat && flash_enabled()) d->flash_until = t + C.flash_ms;
-    int flashing = t < d->flash_until;
+    int use_flash = flash_enabled() && C.flash_ms > 0;
+    if (f.beat && use_flash) d->flash_until = t + C.flash_ms;
+    int flashing = use_flash && t < d->flash_until;
 
     if (!strcmp(C.mode, "spectrum")) {
         if (f.band >= 0) { wr = C.bands[f.band].r; wg = C.bands[f.band].g; wb = C.bands[f.band].b; want_idx = 1000 + f.band; }
         else want_idx = d->idx;
-        want_level = flashing ? C.bright_max : loud_level(a, f.db);
+        want_level = use_flash ? (flashing ? C.bright_max : C.bright_min) : loud_level(a, d->sent_level, f.db);
     } else if (!strcmp(C.mode, "pulse")) {
         double keep = pow(C.pulse_decay / 100.0, BLOCK_MS / 100.0);
-        double hit = f.beat_ratio > 1 ? (f.beat_ratio - 1) / (C.sensitivity / 100.0 - 1 + 1e-6) : 0;
+        if (t >= d->pulse_hold_until) d->pulse *= keep;
+        double floor_r = 1.20, ceil_r = C.sensitivity / 100.0;
+        if (ceil_r < floor_r + 0.15) ceil_r = floor_r + 0.15;
+        double hit = f.onset_ratio > floor_r ? (f.onset_ratio - floor_r) / (ceil_r - floor_r) : 0;
         if (hit > 1) hit = 1;
-        d->pulse = d->pulse * keep; if (hit > d->pulse) d->pulse = hit;
-        if (f.beat) d->pulse = 1;
+        hit = hit * hit;   /* ignore steady bass swell; only percussive jumps push sub-beat hits */
+        if (hit > d->pulse) d->pulse = hit;
+        if (f.beat) { d->pulse = 1.0; d->pulse_hold_until = t + PULSE_HOLD_MS; }
+        double shaped = d->pulse * d->pulse;   /* gamma curve: plunge fast into dark trough between beats */
         want_idx = C.pulse_color;   /* -1 keeps the user's colour */
         if (want_idx >= 0) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
-        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * d->pulse);
+        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * shaped);
     } else {   /* beat */
         if (f.beat) d->idx = wheel_next(d->idx, C.beat_step);
         want_idx = d->idx;
-        want_level = flashing ? C.bright_max : loud_level(a, f.db);
+        want_level = use_flash ? (flashing ? C.bright_max : C.bright_min) : loud_level(a, d->sent_level, f.db);
     }
 
     reap();
     if (pending_pid) return;   /* a service call (no helper) still in flight: one at a time */
 
-    /* on a beat, changes may come sooner than min_interval_ms (down to BEAT_GUARD_MS), so beats aren't missed */
+    /* on a beat peak or trough drop, send down to BEAT_GUARD_MS so peaks and dark valleys aren't clipped */
     int pulse_mode = !strcmp(C.mode, "pulse");
     int beat_iv = C.min_interval_ms < BEAT_GUARD_MS ? C.min_interval_ms : BEAT_GUARD_MS;
     int col_iv = f.beat ? beat_iv : C.min_interval_ms;
@@ -1146,10 +1225,9 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
         }
         if (pending_pid) return;   /* through service call: the brightness waits its turn */
     }
-    int diff = want_level - d->sent_level; if (diff < 0) diff = -diff;
-    int edge = want_level == C.bright_max || want_level == C.bright_min;
-    int br_iv = (f.beat && (flashing || pulse_mode)) ? beat_iv : C.min_interval_ms;
-    if (want_level != d->sent_level && (d->sent_level < 0 || diff >= 2 || edge || pulse_mode || (f.beat && flashing)) && t - d->last_bright >= br_iv) {
+    int snap_bright = (f.beat && (flashing || pulse_mode)) || ((use_flash || pulse_mode) && want_level == C.bright_min);
+    int br_iv = snap_bright ? beat_iv : C.min_interval_ms;
+    if (want_level != d->sent_level && t - d->last_bright >= br_iv) {
         light_bright_raw(want_level + 1, 0);
         d->sent_level = want_level; d->last_bright = t;
         if (C.debug >= 3) say("brightness %d", want_level);
@@ -1905,20 +1983,27 @@ static void startup_restore(void) {
 }
 
 /* ---------- one-shot tools ---------- */
+static void pcm_drain_backlog(struct pcm *pcm, short *buf) {
+    for (int k = 0; k < 16 && pcm_wait(pcm, 0) > 0; k++) {
+        if (pcm_readi(pcm, buf, PERIOD) < 0) break;
+    }
+}
 static int analyze_file(const char *path) {
     C.dry = 1;
     FILE *f = fopen(path, "rb"); if (!f) { perror(path); return 1; }
     Ana a; ana_init(&a); Drv d; memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 22;
     Meter m; memset(&m, 0, sizeof m);
-    short buf[PERIOD * CH]; long long t = 0; int beats = 0;
+    short buf[PERIOD * CH]; long long nblk = 0, t = 0; int beats = 0;
     show_config();
     while (fread(buf, sizeof(short) * CH, PERIOD, f) == PERIOD) {
+        t = nblk * 1000LL * PERIOD / rate;
         Frame fr = ana_block(&a, buf, PERIOD, t);
         if (fr.beat) { beats++; if (C.debug >= 1) say("t=%6lld ms BEAT ratio=%.2f", t, fr.beat_ratio); }
         meter(&m, &a, fr, t);
         drive(&d, &a, fr, t);
-        t += (long long)BLOCK_MS;
+        nblk++;
     }
+    t = nblk * 1000LL * PERIOD / rate;
     fclose(f);
     say("analyzed %lld ms, %d beats", t, beats);
     return 0;
@@ -2041,7 +2126,7 @@ int main(int argc, char **argv) {
         rate = playing;
 
         struct pcm_config cfg; memset(&cfg, 0, sizeof cfg);
-        cfg.channels = CH; cfg.rate = rate; cfg.period_size = PERIOD; cfg.period_count = 16;
+        cfg.channels = CH; cfg.rate = rate; cfg.period_size = PERIOD; cfg.period_count = 8;
         cfg.format = PCM_FORMAT_S16_LE;
         struct pcm *pcm = pcm_open(C.card, C.device, PCM_IN, &cfg);
         if (!pcm || !pcm_is_ready(pcm)) {
@@ -2085,6 +2170,7 @@ int main(int argc, char **argv) {
                         if (C.pulse_color >= 0) light_rgb(WHEEL_R[C.pulse_color], WHEEL_G[C.pulse_color], WHEEL_B[C.pulse_color], 1);
                         else if (C.pulse_color == -1 && base.valid) light_rgb(base.r, base.g, base.b, 1);
                     }   /* pulse keeps the user's colour */
+                    pcm_drain_backlog(pcm, buf);  /* discard audio queued while synchronous IPC/disk writes ran */
                 }
             }
             int w = pcm_wait(pcm, 150);
@@ -2114,6 +2200,18 @@ int main(int argc, char **argv) {
             } else zero_blocks = 0;
 
             Frame f = ana_block(&a, buf, PERIOD, t);
+            /* catch up immediately if scheduler jitter queued extra periods, keeping phase continuous and preserving beats */
+            for (int k = 0; k < 8 && pcm_wait(pcm, 0) > 0; k++) {
+                if (pcm_readi(pcm, buf, PERIOD) < 0) break;
+                t = now_ms() - t0;
+                Frame fn = ana_block(&a, buf, PERIOD, t);
+                if (fn.beat) f.beat = 1;
+                if (fn.beat_ratio > f.beat_ratio) f.beat_ratio = fn.beat_ratio;
+                if (fn.onset_ratio > f.onset_ratio) f.onset_ratio = fn.onset_ratio;
+                if (fn.db > f.db) f.db = fn.db;
+                f.band = fn.band;
+                memcpy(f.band_db, fn.band_db, sizeof f.band_db);
+            }
             meter(&mtr, &a, f, t);
             meter_stream(&ms, &a, f, t);
             if (f.db > sess_peak) sess_peak = f.db;
@@ -2126,6 +2224,8 @@ int main(int argc, char **argv) {
                     if (!base.valid) snapshot_base();
                     take_over_lamp();
                     music_dim();
+                    pcm_drain_backlog(pcm, buf);  /* start locked to live speaker output, not buffered takeover audio */
+                    t = now_ms() - t0;
                     lights_active = 1; say("music started — lights following (%s)", C.mode);
                 }
                 drive(&d, &a, f, t);

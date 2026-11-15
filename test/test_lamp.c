@@ -504,6 +504,113 @@ int main(void) {
     diag_flush("done");
     rf = fopen(target, "r"); assert(rf && fgets(l1, sizeof l1, rf)); assert(!strcmp(l1, "keep\n")); fclose(rf);
 
+    /* ---------- zero-lag beat onset, Beat wheel permutation, Flash blackout, Pulse envelope, and Spectrum auto-adapt ---------- */
+    {
+        load_config("/nonexistent");
+        C.dry = 1; C.debug = 0; rate = 48000;
+
+        /* 1. Beat wheel stepping: coprime steps visit >=20 distinct saturated colours on both Kia and Hyundai without pastel washout */
+        const char *pals[2] = {"kia", "hyundai"};
+        int steps[2] = {19, 23};
+        for (int p = 0; p < 2; p++) {
+            set_palette(pals[p]);
+            for (int si = 0; si < 2; si++) {
+                int seen_col[64] = {0}, idx = 22, uniq = 0;
+                for (int k = 0; k < 40; k++) {
+                    idx = wheel_next(idx, steps[si]);
+                    assert(wheel_saturated(idx));
+                    if (!seen_col[idx]) { seen_col[idx] = 1; uniq++; }
+                }
+                assert(uniq >= 20);
+            }
+        }
+        set_palette("kia");
+
+        /* 2. Zero-lag transient detection + sustained-note re-arming:
+              steady 55 Hz bass for 1 s, then a 300 ms 65 Hz kick at t=1000 ms (must fire in the exact first 10.67 ms block
+              and NOT double-fire at t=1150 ms despite min_beat_ms=140), then a fast second kick at t=1500 ms */
+        C.min_beat_ms = 140; C.sensitivity = 145; C.beat_low_hz = 40; C.beat_high_hz = 180;
+        Ana a; ana_init(&a);
+        short pcm_buf[PERIOD * CH];
+        long long sample_idx = 0;
+        int kick1_block = -1, extra_during_tail = 0, kick2_fired = 0;
+        for (int blk = 0; blk < 160; blk++) {
+            long long t = blk * 1000LL * PERIOD / rate;
+            for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                double ts = sample_idx / (double)rate;
+                double sig = 0.12 * sin(2 * M_PI * 55.0 * ts);
+                if (blk >= 94 && blk < 122) {   /* ~1002 ms to ~1301 ms: 300 ms decaying kick */
+                    double tk = (sample_idx - 94LL * PERIOD) / (double)rate;
+                    sig += 0.60 * sin(2 * M_PI * 65.0 * tk) * exp(-tk * 10.0);
+                }
+                if (blk >= 141 && blk < 155) {  /* ~1504 ms: second kick */
+                    double tk2 = (sample_idx - 141LL * PERIOD) / (double)rate;
+                    sig += 0.60 * sin(2 * M_PI * 65.0 * tk2) * exp(-tk2 * 12.0);
+                }
+                int v16 = (int)lround(sig * 20000.0);
+                pcm_buf[i * CH] = pcm_buf[i * CH + 1] = (short)v16;
+            }
+            Frame fr = ana_block(&a, pcm_buf, PERIOD, t);
+            if (blk >= 94 && blk <= 95 && fr.beat && kick1_block < 0) kick1_block = blk;
+            else if (blk > 95 && blk < 122 && fr.beat) extra_during_tail++;
+            if (blk >= 141 && blk <= 142 && fr.beat) kick2_fired = 1;
+        }
+        assert(kick1_block == 94);       /* zero-lag: detected in the exact block where the kick starts */
+        assert(extra_during_tail == 0);  /* no false re-trigger during the 300 ms decaying 808 tail */
+        assert(kick2_fired == 1);
+
+        /* 3. Flash on beat with level 0 blackout floor: snaps to raw 11 (UI 10) on beat, drops to raw 1 (UI 0) right after flash_ms */
+        snprintf(C.mode, sizeof C.mode, "beat");
+        C.flash_on_beat = 1; C.flash_ms = 70; C.bright_min = 0; C.bright_max = 10; C.min_interval_ms = 50;
+        Drv d; memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 22;
+        Frame fb; memset(&fb, 0, sizeof fb); fb.db = -18; fb.beat = 1;
+        drive(&d, &a, fb, 1000);
+        assert(d.sent_level == 10);
+        fb.beat = 0;
+        drive(&d, &a, fb, 1040);
+        assert(d.sent_level == 10);      /* still inside 70 ms flash hold */
+        drive(&d, &a, fb, 1075);
+        assert(d.sent_level == 0);       /* flash expired: snaps straight to blackout (UI 0 -> raw 1) */
+
+        /* 4. Pulse mode: holds peak 10 for PULSE_HOLD_MS, ignores non-rising steady bass, plunges to bright_min between beats */
+        snprintf(C.mode, sizeof C.mode, "pulse");
+        C.pulse_color = -1; C.pulse_decay = 35; C.bright_min = 1; C.bright_max = 10; C.min_interval_ms = 30;
+        memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+        fb.beat = 1; fb.onset_ratio = 3.0;
+        drive(&d, &a, fb, 2000);
+        assert(d.sent_level == 10);
+        fb.beat = 0; fb.onset_ratio = 0; /* steady bass between beats produces onset_ratio == 0 */
+        drive(&d, &a, fb, 2040);
+        assert(d.sent_level == 10);      /* held through PULSE_HOLD_MS (55 ms) */
+        for (long long tp2 = 2060; tp2 <= 2380; tp2 += 11) drive(&d, &a, fb, tp2);
+        assert(d.sent_level == 1);       /* reaches floor well before next 120 BPM beat at 2500 ms */
+
+        /* 5. Spectrum auto-adaptation: a quieter treble entry wins when it surges above its own baseline, while manual mode stays on bass */
+        C.nbands = parse_bands("40-200:22:1 2000-5000:56:1", C.bands);
+        C.band_smoothing_ms = 0; C.switch_margin = 15;
+        int dyn_band = -1, static_band = -1;
+        for (int dyn = 0; dyn <= 1; dyn++) {
+            C.spectrum_dynamic = dyn;
+            ana_init(&a);
+            sample_idx = 0;
+            Frame fs; memset(&fs, 0, sizeof fs);
+            for (int blk = 0; blk < 180; blk++) {
+                long long t = blk * 1000LL * PERIOD / rate;
+                double treb_amp = blk < 140 ? 0.02 : 0.09;   /* +13 dB treble entry at ~1.5 s, still below 0.25 bass raw energy */
+                for (int i = 0; i < PERIOD; i++, sample_idx++) {
+                    double ts = sample_idx / (double)rate;
+                    double sig = 0.25 * sin(2 * M_PI * 90.0 * ts) + treb_amp * sin(2 * M_PI * 3000.0 * ts);
+                    short s16 = (short)lround(sig * 20000.0);
+                    pcm_buf[i * CH] = pcm_buf[i * CH + 1] = s16;
+                }
+                fs = ana_block(&a, pcm_buf, PERIOD, t);
+            }
+            if (dyn) dyn_band = fs.band; else static_band = fs.band;
+        }
+        assert(static_band == 0);   /* manual boost 1:1 stays pinned on louder 90 Hz bass */
+        assert(dyn_band == 1);      /* spectrum_dynamic=1 switches cleanly to the newly-entering 3 kHz lead */
+    }
+
     char rm[120]; snprintf(rm, sizeof rm, "rm -rf %s", lamp_dir); assert(!system(rm));
     remove(path);
 
