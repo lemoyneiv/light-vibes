@@ -21,9 +21,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.5-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.6-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.5.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.6.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -32,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.5-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.6-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -50,13 +50,13 @@ built-in hook map for yet, such as the Ioniq 6, you can also turn the tile on: *
 Hook map > Map this car from its files**, then **Check the map on this car**, and restart the head unit.
 Every change applies right away.
 
-The app follows the head unit's light and dark themes.
+The Material Design 3 split-pane interface adapts automatically to the head unit's Day and Night themes and fits the wide 1280×480 Gen5W screen without vertical clutter:
 
-- **On/Off** switches the effect off without uninstalling the mod.
+- **Master switch** at the top of the left preset rail switches the effect on or off without uninstalling the mod, alongside **+** (new preset) and **⋮** (lamp diagnostics, feedback, and preset reset/restore).
 - **Presets:** Synesthesia (the default), Phase Pulse, Phase Drift, Duet, Ember, Night Drive, Lively,
-  Intense, Bold Flash, Glow, Epic, Speed, Power and Efficiency. Tap one to use it. If you switch presets
+  Intense, Bold Flash, Glow, Epic, Speed, Power and Efficiency—each with a live color badge. Tap one to use it. If you switch presets
   with unsaved changes, the app asks whether to save them, save them as a new preset, or discard them.
-- **Tabs:** every mode has **Color**, **Brightness** and **Tuning** tabs.
+- **Single-row header bar:** tap the **Mode** chip to open the categorized **Music Modes** / **Hybrid & Driving** mode sheet, or switch between the **Color**, **Brightness** and **Tuning** segmented tabs.
 
 ### Music & hybrid modes
 
@@ -66,12 +66,8 @@ The app follows the head unit's light and dark themes.
 - **Spectrum** gives each sound band its own colour: tap a band, then a colour. **+** splits the
   selected band in two (up to 8 bands), and **−** removes it, with its neighbour taking over its range.
   A 115 ms minimum dwell lets the car's LIN lamp finish each colour transition cleanly without mid-fade mud.
-- **Beat** steps around the colour wheel on each beat, by the **Color step** you choose.
-- **Pulse** pulses the brightness to the beat in one colour. The **Pulse** card shows the colour in
-  use. Pick any colour, or **Drive Mode** at the bottom of the picker to use the car's drive-mode
-  colours, which change live as you switch Eco, Normal and Sport. Picking Drive Mode turns on the car's
-  **Link to Drive Mode** setting, and picking any other colour turns it off, so the colour shows.
-  **Set as ambient light color** also makes the picked colour your car's own ambient colour.
+- **Beat** steps around the colour wheel on each beat, by the **Color step** you choose, with a live 16-beat colour jump preview strip.
+- **Pulse** pulses the brightness to the beat in one colour. The top card shows the active colour alongside **Drive Mode** (which uses the car's Eco, Normal and Sport colours live) and **Set as ambient color** (which makes a picked colour stay as your car's own ambient colour).
 - **Duet** layers two musical roles onto one lamp: a smooth midrange/vocal **Melody Bed** punctuated
   by crisp **Beat Accent** flashes in the 180° opposite complementary colour (or any picked colour),
   with a **Pair walk** slider (`Off`, `every beat`, or `2–16 beats`) that steps complementary pairs
@@ -85,12 +81,12 @@ The app follows the head unit's light and dark themes.
 - **Night Drive** fuses EV driving telemetry with music: **Motor Power & Regen** (emerald green on
   regen, ocean blue cruising, red under throttle) or **Vehicle Speed** sets the colour while music
   beats pulse the brightness—and when music is paused, it cruises calmly at your telemetry colour.
-- **Brightness:** **Follow the music** sets a range (`0` to `10`, where `0` turns the lamp completely off
-  between hits for full strobe contrast) that the brightness moves within, by **Average loudness**,
+- **Brightness:** **Follow music** sets a range (`0` to `10`, where `0` turns the lamp completely off
+  between hits for full strobe contrast) that the brightness moves within, by **Loudness**,
   smooth **Beat pulse** envelope, or crisp **Flash on beat**. **Fixed level** keeps one brightness.
   **Dimmed in Dark** is the car's own setting, on every mode.
 - **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
-  **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** (using a
+  **Manual only** band sensitivity in Spectrum, **Auto BPM** vs **Manual** tempo sync (using a
   3-band log-spectral comb tracker with CarPlay track-skip silence reset), and **Record 20s clip
   to USB** (`Light Vibes tuning/`, RAM-buffered during playback for zero light jitter). Music modes
   automatically snap and filter colours to rich, hue-aware vivid factory swatches (including Hyundai's
@@ -101,28 +97,26 @@ The app follows the head unit's light and dark themes.
 ### Driving modes
 
 These ignore the music. Each fades through the factory colours between a low and a high colour, and
-the slider's **Now** shows the current reading.
+the slider's **Now** pill shows the current reading.
 
 - **Speed** fades between **Low Speed** and **High Speed** over the **Speed Range**, such as 0 mph
   green and 80 mph red. Miles or kilometres follow the head unit's setting.
 - **Power** follows the total power the motors are using, with separate colours for **Regen**,
   **Zero** and **Full Power** across the **Power Range** (-150 to 350 kW).
 - **Efficiency** fades between **Low Efficiency** and **High Efficiency** across the **Efficiency
-  Range**, in mi/kWh or km/kWh as the head unit is set. **Efficiency Based On** chooses **Current
+  Range**, in mi/kWh or km/kWh as the head unit is set. **Efficiency based on** chooses **Current
   Trip**, worked out by Light Vibes since the car was started, or **Car Average**, the same average
   the cluster shows.
 - Each has its own brightness, or the car's **Dimmed in Dark**.
 
 ### Presets
 
-- **+ New preset**, at the end of the list, starts a preset from Synesthesia as it came. **Save** keeps
-  your changes in the current preset, and **Save as…** copies them to a new one. Presets can have
-  any name.
-- **Reset modified presets** appears automatically whenever any built-in preset has saved overrides,
+- **+** in the preset header starts a new preset from Synesthesia as it came. When a preset has unsaved edits, **Save** keeps
+  them in the current preset, **Save as…** copies them to a new one, and **Undo** reverts them immediately.
+- **Reset modified built-in presets** appears in the **⋮** menu whenever any built-in preset has saved overrides,
   restoring all built-in presets to their shipped settings in one tap.
 - **Delete** removes the current preset. For a built-in preset you've changed, the same prompt offers
-  **Reset instead**. Deleted built-in presets come back with **Restore built-in presets** at the end
-  of the list.
+  **Reset instead**. Deleted built-in presets come back anytime via **Restore deleted built-in presets** in the **⋮** menu.
 
 ### Your own light settings
 

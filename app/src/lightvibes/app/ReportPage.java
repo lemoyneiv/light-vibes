@@ -57,6 +57,8 @@ final class ReportPage extends LinearLayout {
     ReportPage(Context c, File filesDir, Runnable close) {
         super(c);
         setOrientation(VERTICAL);
+        setBackgroundDrawable(Widgets.shape(CARD, RULE, dp(1), dp(20)));
+        setPadding(dp(20), dp(16), dp(20), dp(16));
         diag = new File(filesDir, "diag");
         request = new File(diag, "request");
         result = new File(diag, "result");
@@ -88,28 +90,27 @@ final class ReportPage extends LinearLayout {
     }
 
     private TextView button(String label, boolean on, View.OnClickListener click) {
-        TextView t = text(label, 18, on ? ON_TEXT : TEXT);
+        TextView t = text(label, 15.5f, on ? ON_PRIMARY : TEXT);
+        t.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         t.setGravity(Gravity.CENTER);
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(on ? CARD_ON : CARD);
-        g.setCornerRadius(dp(8));
-        t.setBackgroundDrawable(g);
+        t.setPadding(dp(20), 0, dp(20), 0);
+        t.setBackgroundDrawable(Widgets.shape(on ? ACCENT : SURFACE_HIGH, on ? 0 : RULE, on ? 0 : dp(1), dp(22)));
         t.setOnClickListener(click);
         return t;
     }
 
     private void heading(String s) {
-        TextView t = text(s, 22, TEXT);
+        TextView t = text(s, 20, TEXT);
         t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setPadding(0, dp(4), 0, dp(8));
+        t.setPadding(0, 0, 0, dp(6));
         addView(t);
     }
 
     private void buttons(String first, View.OnClickListener a, String second, View.OnClickListener b) {
         LinearLayout row = new LinearLayout(getContext());
-        row.setPadding(0, dp(16), 0, 0);
-        row.addView(button(first, true, a), new LayoutParams(dp(220), dp(56)));
-        LayoutParams p = new LayoutParams(dp(140), dp(56));
+        row.setPadding(0, dp(14), 0, 0);
+        row.addView(button(first, true, a), new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
+        LayoutParams p = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
         p.leftMargin = dp(10);
         row.addView(button(second, false, b), p);
         addView(row);
@@ -336,16 +337,21 @@ final class ReportPage extends LinearLayout {
         actions.setPadding(0, dp(14), 0, 0);
         actions.addView(button("Test again", false, new View.OnClickListener() {
             @Override public void onClick(View v) { showIntro(); }
-        }), new LayoutParams(0, dp(52), 1));
-        LayoutParams cp = new LayoutParams(0, dp(52), 1);
-        cp.leftMargin = dp(8);
-        actions.addView(button("Close", false, closeClick), cp);
+        }), new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
+        LayoutParams cp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
+        cp.leftMargin = dp(10);
+        actions.addView(button("Back to settings", true, closeClick), cp);
         left.addView(actions);
+        row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(left, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        LayoutParams qp = new LayoutParams(dp(390), dp(390));
-        qp.leftMargin = dp(16);
-        row.addView(new QrView(getContext(), report.issueUrl()), qp);
+        LinearLayout qrCard = new LinearLayout(getContext());
+        qrCard.setPadding(dp(10), dp(10), dp(10), dp(10));
+        qrCard.setBackgroundDrawable(Widgets.shape(0xFFFFFFFF, RULE, dp(1), dp(16)));
+        qrCard.addView(new QrView(getContext(), report.issueUrl()), new LayoutParams(dp(290), dp(290)));
+        LayoutParams qp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        qp.leftMargin = dp(20);
+        row.addView(qrCard, qp);
         addView(row);
 
         if (map.containsKey("stage")) {

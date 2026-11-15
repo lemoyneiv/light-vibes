@@ -4,7 +4,6 @@ import static lightvibes.app.Ui.*;
 
 import android.content.Context;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -15,42 +14,50 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 
 /**
- * Feedback: ideas and requests, as a GitHub issue labelled "enhancement" (the feedback.yml form). The code opens the
- * form on the owner's phone with the app version, head unit and current mode filled in; nothing is sent from the car.
+ * Feedback: ideas and requests, as a GitHub issue labelled "enhancement" (the feedback.yml form), styled in Material 3.
  */
 final class FeedbackPage extends LinearLayout {
-    private static final String ISSUE = "https://github.com/dibble9012/light-vibes/issues/new?template=feedback.yml&labels=enhancement";   // the form adds the label too
+    private static final String ISSUE = "https://github.com/dibble9012/light-vibes/issues/new?template=feedback.yml&labels=enhancement";
 
     FeedbackPage(Context c, String mode, final Runnable close) {
         super(c);
         setOrientation(HORIZONTAL);
+        setGravity(Gravity.CENTER_VERTICAL);
+        setBackgroundDrawable(Widgets.shape(CARD, RULE, dp(1), dp(20)));
+        setPadding(dp(20), dp(18), dp(20), dp(18));
+
         LinearLayout left = new LinearLayout(c);
         left.setOrientation(VERTICAL);
-        TextView h = text("Send feedback", 22, TEXT);
+        TextView h = text("Send feedback", 21, TEXT);
         h.setTypeface(Typeface.DEFAULT_BOLD);
-        h.setPadding(0, dp(4), 0, dp(8));
+        h.setPadding(0, 0, 0, dp(8));
         left.addView(h);
-        left.addView(text("Have an idea or something you'd like changed? Scan the code with your phone to open a suggestion "
-                + "on GitHub, describe it, and submit it.", 17, TEXT));
-        TextView note = text("Nothing is sent from the car. The code only adds the app version, head unit and current mode.", 15, MUTED);
-        note.setPadding(0, dp(12), 0, 0);
+        left.addView(text("Have an idea or something you'd like changed? Scan the QR code with your phone to open a "
+                + "suggestion on GitHub, describe it, and submit it.", 16, TEXT));
+        TextView note = text("Nothing is sent from the car. The code only pre-fills the app version, head unit and current mode.", 14, MUTED);
+        note.setPadding(0, dp(10), 0, 0);
         left.addView(note);
-        TextView done = text("Close", 18, TEXT);
+
+        TextView done = text("Back to settings", 15, ON_PRIMARY_CONT);
+        done.setTypeface(Typeface.DEFAULT_BOLD);
         done.setGravity(Gravity.CENTER);
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(CARD);
-        g.setCornerRadius(dp(8));
-        done.setBackgroundDrawable(g);
+        done.setPadding(dp(22), 0, dp(22), 0);
+        done.setBackgroundDrawable(Widgets.shape(PRIMARY_CONT, 0, 0, dp(22)));
         done.setOnClickListener(new OnClickListener() {
             @Override public void onClick(View v) { close.run(); }
         });
-        LayoutParams dp = new LayoutParams(dp(180), dp(56));
-        dp.topMargin = dp(20);
-        left.addView(done, dp);
+        LayoutParams dpBtn = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
+        dpBtn.topMargin = dp(18);
+        left.addView(done, dpBtn);
         addView(left, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        LayoutParams qp = new LayoutParams(dp(390), dp(390));
-        qp.leftMargin = dp(16);
-        addView(new QrView(c, link(c, mode)), qp);
+
+        LinearLayout qrCard = new LinearLayout(c);
+        qrCard.setPadding(dp(10), dp(10), dp(10), dp(10));
+        qrCard.setBackgroundDrawable(Widgets.shape(0xFFFFFFFF, RULE, dp(1), dp(16)));
+        qrCard.addView(new QrView(c, link(c, mode)), new LayoutParams(dp(290), dp(290)));
+        LayoutParams qp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        qp.leftMargin = dp(20);
+        addView(qrCard, qp);
     }
 
     static String link(Context c, String mode) {
