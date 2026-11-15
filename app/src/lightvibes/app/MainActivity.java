@@ -71,13 +71,19 @@ public class MainActivity extends Activity {
 
     private static final String DEFAULT_BANDS = "40-130:#FF0020:1.6 130-450:#FF3C0F:2.0 450-2000:#00FF40:3.2 2000-6000:#00AAFF:9 6000-16000:#9100FF:32";
     private static final String[] BUILT_IN = {
-        "lively", "intense", "marigold", "contrast", "pulse3", "glow", "epic",
-        "duet", "drop", "synesthesia", "ember", "drift", "nightdrive",
+        "synesthesia", "phasepulse", "drift", "duet", "ember", "nightdrive",
+        "lively", "intense", "pulse3", "glow", "epic",
         "speed", "power", "efficiency"
     };
-    private static final String FIRST_RUN_PRESET = "b:lively";
+    private static final String FIRST_RUN_PRESET = "b:synesthesia";
+    private static final double[] FULL_WHEEL_HUES = {358.0, 38.0, 88.0, 178.0, 209.0, 246.0, 268.0, 287.0, 314.0, 336.0};
     private static final int MAX_BANDS = 8;      // what fits on screen; lightvibesd takes up to 12
     private static final int MIN_SPLIT_HZ = 60;  // each half keeps at least one FFT bin (23.4 Hz each)
+
+    private static boolean isBuiltIn(String name) {
+        for (String b : BUILT_IN) if (b.equals(name)) return true;
+        return false;
+    }
 
 
     private File settingsDir, presetsDir, overridesDir, hiddenDir, activeFile;
@@ -298,6 +304,14 @@ public class MainActivity extends Activity {
     private void loadCurrent() {
         settingsDir.mkdirs();
         updatePalette();
+        String[] hNames = hiddenDir.list();
+        if (hNames != null) for (String n : hNames) if (!isBuiltIn(n)) new File(hiddenDir, n).delete();
+        String[] oNames = overridesDir.list();
+        if (oNames != null) {
+            for (String n : oNames) {
+                if (n.endsWith(".conf") && !isBuiltIn(n.substring(0, n.length() - 5))) new File(overridesDir, n).delete();
+            }
+        }
         cfg.clear();
         String[] names = settingsDir.list();
         if (names != null) {
@@ -313,7 +327,8 @@ public class MainActivity extends Activity {
             active = a.endsWith("*") ? a.substring(0, a.length() - 1) : a;
             modified = a.endsWith("*");
         }
-        if (cfg.isEmpty()) applyPreset(FIRST_RUN_PRESET);
+        boolean staleBuiltIn = active.startsWith("b:") && !isBuiltIn(active.substring(2));
+        if (cfg.isEmpty() || staleBuiltIn || "drop".equals(cfg.get("mode"))) applyPreset(FIRST_RUN_PRESET);
         else if (!modified && active.startsWith("b:")) {
             // an untouched built-in preset follows the shipped one when an update changes it
             Map<String, String> shipped = readPreset(active);
@@ -444,7 +459,8 @@ public class MainActivity extends Activity {
         if (id.startsWith("c:")) return n;
         if (n.equals("pulse3")) return "Bold Flash";
         if (n.equals("nightdrive")) return "Night Drive";
-        if (n.equals("drift")) return "Phrase Drift";
+        if (n.equals("drift")) return "Phase Drift";
+        if (n.equals("phasepulse")) return "Phase Pulse";
         return n.substring(0, 1).toUpperCase() + n.substring(1);
     }
 
@@ -544,12 +560,9 @@ public class MainActivity extends Activity {
         }
         if (mode.equals("duet")) {
             int bed = colorIndexOf(m.get("duet_bed"), -1, -1), acc = colorIndexOf(m.get("duet_accent"), -1, -1);
+            int nb = Math.max(0, Math.min(16, intOf(m.get("duet_beats"), bed >= 0 ? 0 : 4)));
+            if (nb > 0) return "Duet · pair walk (" + (nb == 1 ? "every beat" : nb + " beats") + ")";
             return "Duet · " + (bed >= 0 ? "picked bed" : "auto bed") + " + " + (acc >= 0 ? "picked flash" : "opposite flash");
-        }
-        if (mode.equals("drop")) {
-            int st = Math.max(0, Math.min(2, intOf(m.get("drop_style"), 0)));
-            String[] names = {"Full Neon", "Cool to Fire", "Cyberpunk"};
-            return "Drop · " + names[st] + " build & drop";
         }
         if (mode.equals("synesthesia")) {
             int sh = intOf(m.get("syn_shift"), 0);
@@ -558,13 +571,15 @@ public class MainActivity extends Activity {
         if (mode.equals("ember")) {
             int th = Math.max(0, Math.min(2, intOf(m.get("ember_theme"), 0)));
             String[] names = {"Fire", "Plasma", "Aurora"};
-            return "Ember · " + names[th] + " beat glow";
+            return "Ember · " + names[th] + " beat & spark glow";
         }
         if (mode.equals("drift")) {
             int th = Math.max(0, Math.min(4, intOf(m.get("drift_theme"), 0)));
             int nb = intOf(m.get("drift_beats"), 4);
             String[] names = {"Forest & Aurora", "Cyberpunk", "Sunset", "Ocean Deep", "Full Wheel"};
-            return "Drift · " + names[th] + " (" + nb + " beats)";
+            boolean fixed = "1".equals(m.get("brightness_fixed"));
+            boolean bpulse = !fixed && "2".equals(m.get("flash_on_beat"));
+            return "Phase Drift · " + names[th] + " · " + nb + " beats" + (fixed ? " · steady" : bpulse ? " · pulse" : "");
         }
         if (mode.equals("nightdrive")) {
             return "Night Drive · " + ("speed".equals(m.get("nd_source")) ? "speed" : "power & regen") + " + beat pulse";
@@ -828,13 +843,13 @@ public class MainActivity extends Activity {
             return;
         }
         if (tab == TAB_BRIGHTNESS) {
-            if (mode.equals("pulse") || mode.equals("duet") || mode.equals("drop") || mode.equals("ember") || mode.equals("nightdrive")) {
+            if (mode.equals("pulse") || mode.equals("duet") || mode.equals("ember") || mode.equals("nightdrive")) {
                 addBrightness();
                 return;
             }
             addBrightnessChoice();
             if ("1".equals(cfg.get("brightness_fixed"))) addGaugeBrightness();   // one level, and Dimmed in Dark
-            else addBrightness();                                         // a range (flashing is a radio choice)
+            else addBrightness();                                         // a range (flashing or beat pulse is a radio choice)
             return;
         }
         if (mode.equals("spectrum")) {
@@ -844,8 +859,6 @@ public class MainActivity extends Activity {
             addStepSlider();
         } else if (mode.equals("duet")) {
             addDuetColour();
-        } else if (mode.equals("drop")) {
-            addDropColour();
         } else if (mode.equals("synesthesia")) {
             addSynesthesiaColour();
         } else if (mode.equals("ember")) {
@@ -863,15 +876,18 @@ public class MainActivity extends Activity {
      * Pulse's Color tab: the car's own colour, or a picked one; and a switch that makes the picked one the car's ambient
      * colour too (it then stays after the music, as if picked in Settings > Vehicle > Lights > Ambient light).
      */
-    /** Spectrum, Beat, Synesthesia and Drift: brightness follows the music, or stays at one level. */
+    /** Spectrum, Beat, Synesthesia and Phase Drift: brightness follows the music, or stays at one level. */
     private void addBrightnessChoice() {
         TextView title = text("Brightness", 16, MUTED);
         title.setPadding(0, dp(12), 0, dp(2));
         editor.addView(title);
         boolean fixed = "1".equals(cfg.get("brightness_fixed"));
         addRadios(2000, new String[][] {{"0", "Follow the music"}, {"1", "Fixed level"}}, fixed ? "1" : "0", "brightness_fixed");
-        // following the music: by the average loudness alone, or with a flash to the top of the range on each beat
-        if (!fixed) addRadios(2100, new String[][] {{"0", "Average loudness"}, {"1", "Flash on beat"}}, flashOn() ? "1" : "0", "flash_on_beat");
+        // following the music: average loudness, smooth beat pulse envelope, or crisp flash to max on each beat
+        if (!fixed) {
+            String cur = "2".equals(cfg.get("flash_on_beat")) ? "2" : flashOn() ? "1" : "0";
+            addRadios(2100, new String[][] {{"0", "Average loudness"}, {"2", "Beat pulse"}, {"1", "Flash on beat"}}, cur, "flash_on_beat");
+        }
     }
 
     /** A row of radio buttons for one setting; picking one saves it and redraws the page. */
@@ -993,9 +1009,10 @@ public class MainActivity extends Activity {
     }
 
     private static String shippedForMode(String m) {
-        if ("spectrum".equals(m)) return "intense";
-        if ("beat".equals(m)) return "lively";
+        if ("spectrum".equals(m)) return "lively";
+        if ("beat".equals(m)) return "intense";
         if ("pulse".equals(m)) return "glow";
+        if ("drift".equals(m)) return "phasepulse";
         return m;
     }
 
@@ -1013,8 +1030,8 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         String[][][] rows = {
-            {{"spectrum", "Spectrum"}, {"beat", "Beat"}, {"pulse", "Pulse"}, {"duet", "Duet"}, {"drop", "Drop"}, {"synesthesia", "Synesthesia"}},
-            {{"ember", "Ember"}, {"drift", "Drift"}, {"nightdrive", "Night Drive"}, {"speed", "Speed"}, {"power", "Power"}, {"efficiency", "Efficiency"}}
+            {{"synesthesia", "Synesthesia"}, {"spectrum", "Spectrum"}, {"beat", "Beat"}, {"pulse", "Pulse"}, {"duet", "Duet"}, {"ember", "Ember"}},
+            {{"drift", "Phase Drift"}, {"nightdrive", "Night Drive"}, {"speed", "Speed"}, {"power", "Power"}, {"efficiency", "Efficiency"}}
         };
         String current = mode();
         for (int r = 0; r < rows.length; r++) {
@@ -1115,16 +1132,21 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static String duetWalkLabel(int nb) {
+        return nb <= 0 ? "Pair walk: Off" : nb == 1 ? "Pair walk: every beat" : "Pair walk: " + nb + " beats";
+    }
+
     private void addDuetColour() {
         if (duetEnd < 0 || duetEnd > 1) duetEnd = 0;
         final int bed = colorIndexOf(cfg.get("duet_bed"), -1, -1);
         final int acc = colorIndexOf(cfg.get("duet_accent"), -1, -1);
+        final int nb0 = Math.max(0, Math.min(16, intOf(cfg.get("duet_beats"), bed >= 0 ? 0 : 4)));
         int baseBed = bed >= 0 ? bed : vividAtHue(178.0);
         int shownAcc = acc >= 0 ? acc : vividAtHue(wheelHue(baseBed) + 180.0);
 
         LinearLayout ends = new LinearLayout(this);
         ends.setBaselineAligned(false);
-        String[] titles = {"Melody Bed" + (bed < 0 ? " (auto)" : ""), "Beat Accent" + (acc < 0 ? " (opposite)" : "")};
+        String[] titles = {"Melody Bed" + (bed < 0 ? " (wheel)" : ""), "Beat Accent" + (acc < 0 ? " (opposite)" : "")};
         for (int i = 0; i < 2; i++) {
             final int which = i;
             LinearLayout cell = new LinearLayout(this);
@@ -1134,8 +1156,19 @@ public class MainActivity extends Activity {
             cell.setPadding(dp(4), dp(6), dp(4), dp(6));
             View swatch = new View(this);
             if (i == 0 && bed < 0) {
-                int[] autoCols = {wheelColour(vividAtHue(178.0)), wheelColour(vividAtHue(209.0)), wheelColour(vividAtHue(92.0)), wheelColour(vividAtHue(268.0))};
+                int[] autoCols = {
+                    wheelColour(vividAtHue(178.0)), wheelColour(vividAtHue(209.0)),
+                    wheelColour(vividAtHue(287.0)), wheelColour(vividAtHue(38.0)), wheelColour(vividAtHue(88.0))
+                };
                 GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, autoCols);
+                g.setCornerRadius(dp(6));
+                swatch.setBackgroundDrawable(g);
+            } else if (i == 1 && bed < 0 && acc < 0) {
+                int[] oppCols = {
+                    wheelColour(vividAtHue(358.0)), wheelColour(vividAtHue(29.0)),
+                    wheelColour(vividAtHue(107.0)), wheelColour(vividAtHue(218.0)), wheelColour(vividAtHue(268.0))
+                };
+                GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, oppCols);
                 g.setCornerRadius(dp(6));
                 swatch.setBackgroundDrawable(g);
             } else {
@@ -1164,12 +1197,16 @@ public class MainActivity extends Activity {
         final int curIdx = duetEnd == 0 ? bed : acc;
         addPalette(curIdx, new ColourPick() {
             @Override public void pick(int idx) {
+                if (!cfg.containsKey("duet_beats")) {
+                    cfg.put("duet_beats", String.valueOf(nb0));
+                    writeFile(new File(settingsDir, "duet_beats"), String.valueOf(nb0));
+                }
                 set(targetKey, String.valueOf(idx));
                 refreshEditor();
             }
-        });
+        }, 24, 6);
 
-        TextView autoBtn = text(duetEnd == 0 ? "Auto Drift Bed (rotates every 8 beats)" : "Auto Opposite Accent (180° complement)", 15, curIdx < 0 ? ON_TEXT : TEXT);
+        TextView autoBtn = text(duetEnd == 0 ? "Auto Wheel Bed" : "Auto Opposite Accent (180° complement)", 15, curIdx < 0 ? ON_TEXT : TEXT);
         autoBtn.setGravity(Gravity.CENTER);
         autoBtn.setBackgroundDrawable(rounded(curIdx < 0 ? CARD_ON : CARD, curIdx < 0 ? TEXT : OUTLINE, curIdx < 0 ? 2 : 1, 6));
         autoBtn.setOnClickListener(new View.OnClickListener() {
@@ -1182,6 +1219,17 @@ public class MainActivity extends Activity {
         alp.leftMargin = alp.rightMargin = dp(2);
         alp.topMargin = dp(4);
         editor.addView(autoBtn, alp);
+
+        final TextView walkLbl = text(duetWalkLabel(nb0), 16, TEXT);
+        RangeSlider walkBar = level(0, 16, 1, nb0);
+        walkBar.setListener(new RangeSlider.Listener() {
+            @Override public void moved(int lo, int hi) { walkLbl.setText(duetWalkLabel(hi)); }
+            @Override public void done(int lo, int hi) {
+                set("duet_beats", String.valueOf(hi));
+                refreshPresets();
+            }
+        });
+        editor.addView(sliderRow(walkLbl, 185, walkBar, null, null));
     }
 
     private View swatchStripView(int[] wheelIndices, int heightDp) {
@@ -1192,43 +1240,6 @@ public class MainActivity extends Activity {
             strip.addView(seg, new LinearLayout.LayoutParams(0, dp(heightDp), 1));
         }
         return strip;
-    }
-
-    private void addDropColour() {
-        addNote("Follows song dynamics: calm cool simmer in breakdowns, rising tension on build-ups, and bold neon leaps when the drop hits.");
-        final int cur = Math.max(0, Math.min(2, intOf(cfg.get("drop_style"), 0)));
-        String[] names = {"Full Neon", "Cool to Fire", "Cyberpunk"};
-        double[][] hues = {
-            {0.0, 40.0, 315.0, 92.0, 185.0, 288.0},
-            {0.0, 20.0, 40.0, 340.0, 12.0, 315.0},
-            {355.0, 315.0, 288.0, 185.0, 235.0, 335.0}
-        };
-        LinearLayout row = new LinearLayout(this);
-        row.setBaselineAligned(false);
-        for (int i = 0; i < 3; i++) {
-            final int style = i;
-            LinearLayout cell = new LinearLayout(this);
-            cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER);
-            cell.setBackgroundDrawable(rounded(CARD, i == cur ? TEXT : CARD, 3, 8));
-            cell.setPadding(dp(8), dp(8), dp(8), dp(8));
-            int[] cols = new int[6];
-            for (int k = 0; k < 6; k++) cols[k] = vividAtHue(hues[i][k]);
-            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(24));
-            sp.bottomMargin = dp(6);
-            cell.addView(swatchStripView(cols, 24), sp);
-            TextView title = text(names[i], 16, TEXT);
-            title.setGravity(Gravity.CENTER);
-            cell.addView(title);
-            cell.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    set("drop_style", String.valueOf(style));
-                    refreshEditor();
-                }
-            });
-            row.addView(cell, weighted(0, 0, 1, i == 0 ? 0 : 8));
-        }
-        editor.addView(row);
     }
 
     private void addSynesthesiaColour() {
@@ -1273,20 +1284,20 @@ public class MainActivity extends Activity {
 
     private static int emberWheelAt(int theme, double heat) {
         double[][] stops = {
-            {268.0, 355.0, 18.0, 40.0},
-            {250.0, 292.0, 210.0, 182.0},
-            {225.0, 178.0, 92.0, 40.0}
+            {268.0, 322.0,   6.0,  38.0},
+            {246.0, 287.0, 209.0, 175.0},
+            {246.0, 178.0,  88.0,  38.0}
         };
         double[] s = stops[Math.max(0, Math.min(2, theme))];
         double h;
-        if (heat < 0.33) h = hueLerp(s[0], s[1], heat / 0.33);
-        else if (heat < 0.72) h = hueLerp(s[1], s[2], (heat - 0.33) / 0.39);
-        else h = hueLerp(s[2], s[3], (heat - 0.72) / 0.28);
+        if (heat < 0.28) h = hueLerp(s[0], s[1], heat / 0.28);
+        else if (heat < 0.56) h = hueLerp(s[1], s[2], (heat - 0.28) / 0.28);
+        else h = hueLerp(s[2], s[3], (heat - 0.56) / 0.44);
         return vividAtHue(h);
     }
 
     private void addEmberColour() {
-        addNote("Each beat ignites a bright hot flare (right) that cools smoothly through rich glowing embers (left) as the note decays.");
+        addNote("Each beat ignites a bright hot flare (right) while snares and claps re-ignite glowing embers (middle to left) as notes decay.");
         final int cur = Math.max(0, Math.min(2, intOf(cfg.get("ember_theme"), 0)));
         String[] names = {"Fire", "Plasma", "Aurora"};
         LinearLayout row = new LinearLayout(this);
@@ -1318,7 +1329,7 @@ public class MainActivity extends Activity {
     }
 
     private void addDriftColour() {
-        addNote("Holds each curated mood color across whole musical phrases, shifting cleanly on bar boundaries.");
+        addNote("Steps through curated mood palettes or the full vivid wheel every N beats.");
         final int cur = Math.max(0, Math.min(4, intOf(cfg.get("drift_theme"), 0)));
         String[] names = {"Forest & Aurora", "Cyberpunk", "Sunset", "Ocean Deep", "Full Wheel"};
         double[][] themes = {
@@ -1326,7 +1337,7 @@ public class MainActivity extends Activity {
             {186.0, 236.0, 290.0, 330.0, 356.0},
             {40.0, 16.0, 356.0, 316.0, 270.0},
             {176.0, 192.0, 209.0, 232.0, 256.0},
-            {0.0, 72.0, 144.0, 216.0, 288.0}
+            {358.0, 38.0, 88.0, 209.0, 287.0}
         };
         LinearLayout row = new LinearLayout(this);
         row.setBaselineAligned(false);
@@ -1360,7 +1371,10 @@ public class MainActivity extends Activity {
         RangeSlider bar = level(2, 16, 1, nb);
         bar.setListener(new RangeSlider.Listener() {
             @Override public void moved(int lo, int hi) { label.setText("Beats per color: " + hi); }
-            @Override public void done(int lo, int hi) { set("drift_beats", String.valueOf(hi)); }
+            @Override public void done(int lo, int hi) {
+                set("drift_beats", String.valueOf(hi));
+                refreshPresets();
+            }
         });
         editor.addView(sliderRow(label, 185, bar, null, null));
     }
@@ -1630,20 +1644,27 @@ public class MainActivity extends Activity {
 
     private boolean flashOn() {
         String m = mode();
-        if (m.equals("duet") || m.equals("drop")) return true;
+        if (m.equals("duet")) return true;
         String v = cfg.get("flash_on_beat");
-        return v != null && !v.equals("-1") ? !v.equals("0") : m.equals("beat");
+        return v != null && !v.equals("-1") ? "1".equals(v) : m.equals("beat");
     }
 
-    /** Spectrum, Beat, Synesthesia or Drift at one brightness level: loudness and flashes then don't touch the brightness. */
+    /** Spectrum, Beat, Synesthesia or Phase Drift at one brightness level: loudness and flashes then don't touch the brightness. */
     private boolean fixedLevel() {
         String m = mode();
         return "1".equals(cfg.get("brightness_fixed")) && (m.equals("spectrum") || m.equals("beat") || m.equals("synesthesia") || m.equals("drift"));
     }
 
+    /** Smooth beat-pulse brightness envelope on Spectrum, Beat, Synesthesia or Phase Drift (e.g. Phase Pulse). */
+    private boolean beatPulseOn() {
+        String m = mode();
+        return !fixedLevel() && "2".equals(cfg.get("flash_on_beat"))
+                && (m.equals("spectrum") || m.equals("beat") || m.equals("synesthesia") || m.equals("drift"));
+    }
+
     private boolean pulseLike() {
         String m = mode();
-        return m.equals("pulse") || m.equals("ember") || m.equals("nightdrive");
+        return m.equals("pulse") || m.equals("ember") || m.equals("nightdrive") || beatPulseOn();
     }
 
     /** Beats flash the brightness: Flash on Beat is on and the brightness follows the music. */
@@ -1653,13 +1674,13 @@ public class MainActivity extends Activity {
 
     private boolean usesLoudness() {
         String m = mode();
-        return (m.equals("spectrum") || m.equals("beat") || m.equals("synesthesia") || m.equals("drift")) && !fixedLevel() && !flashing();
+        return (m.equals("spectrum") || m.equals("beat") || m.equals("synesthesia") || m.equals("drift")) && !fixedLevel() && !flashing() && !beatPulseOn();
     }
 
-    /** Beats matter: they move Beat/Duet/Drop/Drift's colour, Pulse/Ember/Night Drive's brightness, or a flash. */
+    /** Beats matter: they move Beat/Duet/Phase Drift's colour, Pulse/Ember/Night Drive/Beat-pulse's brightness, or a flash. */
     private boolean beatsMatter() {
         String m = mode();
-        return (!m.equals("spectrum") && !m.equals("synesthesia")) || flashing();
+        return (!m.equals("spectrum") && !m.equals("synesthesia")) || flashing() || beatPulseOn();
     }
 
     // ---------- speed mode ----------
@@ -2062,8 +2083,6 @@ public class MainActivity extends Activity {
             tiles.add(slider("Colour stickiness", "How much louder a new band must get (marker line)", "switch_margin", 15, 0, 200, 5, "%"));
         } else if (mode.equals("synesthesia")) {
             tiles.add(slider("Pitch smoothing", "Lower tracks fast notes, higher glides smoothly", "band_smoothing_ms", 115, 20, 600, 10, " ms"));
-        } else if (mode.equals("drop")) {
-            tiles.add(slider("Drop trigger", "Higher enters full drop more easily", "drop_sensitivity", 100, 50, 150, 5, "%"));
         }
         tiles.add(slider("Fastest light change", "Shortest time between changes", "min_interval_ms", 50, 20, 1000, 10, " ms"));
         // only what has an effect with the other settings: loudness moves the brightness only when Average loudness is active
@@ -2081,12 +2100,12 @@ public class MainActivity extends Activity {
             if (!bands.isEmpty()) editor.addView(boostSlider(bands));
         }
 
-        if (beatsMatter()) {      // Spectrum and Synesthesia only use beats for flashes
+        if (beatsMatter()) {      // Spectrum and Synesthesia only use beats for flashes or beat pulse
             tiles = new ArrayList<View>();
             tiles.add(slider("Beat sensitivity", "Lower catches more beats (marker line)", "sensitivity", 150, 105, 500, 5, "%"));
             tiles.add(slider("Shortest beat gap", "Ignores beats closer together", "min_beat_ms", 200, 60, 1000, 10, " ms"));
             tiles.add(slider("Beat average", "Shorter adapts to build-ups faster", "beat_avg_ms", 1500, 200, 5000, 100, " ms"));
-            int glowDef = mode.equals("ember") ? 52 : mode.equals("nightdrive") ? 45 : 35;
+            int glowDef = mode.equals("ember") ? 38 : mode.equals("nightdrive") ? 45 : beatPulseOn() ? 40 : 35;
             if (pulseLike()) tiles.add(slider("Glow", "Higher fades more slowly", "pulse_decay", glowDef, 0, 99, 1, "%"));
             else if (flashing()) tiles.add(slider("Flash length", "How long each flash holds", "flash_ms", 120, 30, 1000, 10, " ms"));
             tiles.add(beatRange());
@@ -2364,7 +2383,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** New presets start from Lively as it shipped: its timing suits most music, and all of it can be changed. */
+    /** New presets start from Synesthesia as it shipped: its smooth response suits most music, and all of it can be changed. */
     private void askNew() {
         final EditText name = new EditText(this);
         name.setSingleLine(true);
@@ -2379,7 +2398,7 @@ public class MainActivity extends Activity {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         String n = cleanName(name.getText().toString());
                         n = n.isEmpty() ? freeName() : unusedName(n);
-                        cfg = readShipped("lively");
+                        cfg = readShipped("synesthesia");
                         selectedBand = 0;
                         writeAllSettings();
                         savePreset(n);

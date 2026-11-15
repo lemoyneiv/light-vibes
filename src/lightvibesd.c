@@ -56,7 +56,7 @@
 #include <pthread.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.6.4"
+#define VERSION "0.6.5"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
@@ -106,7 +106,7 @@ static struct {
     char dir[256];
     int enabled, debug, dry;
     char palette[16];           /* auto | kia | hyundai */
-    char mode[16];              /* beat | spectrum | pulse | duet | drop | synesthesia | ember | drift | nightdrive | speed | power | efficiency */
+    char mode[16];              /* synesthesia | spectrum | beat | pulse | duet | ember | drift | nightdrive | speed | power | efficiency */
     int speed_low, speed_high, speed_color_low, speed_color_high;   /* speed mode: in speed_unit, wheel indexes */
     char speed_unit[8];         /* mph | kmh */
     int power_low, power_high, power_color_low, power_color_zero, power_color_high;   /* power mode: kW, negative = regen */
@@ -125,16 +125,15 @@ static struct {
     int beat_low_hz, beat_high_hz;
     int beat_avg_ms;            /* running-average window for the beat band */
     int min_beat_ms;
-    int flash_on_beat;          /* full brightness for flash_ms after each beat */
+    int flash_on_beat;          /* -1 mode default, 0 loudness, 1 flash on beat, 2 beat pulse */
     int flash_ms;
     int beat_step;              /* wheel steps per beat (beat mode) */
     int skip_white;
     int auto_bpm;               /* 1 = detect track BPM and scale flash, pulse hold/decay, and beat cooldown */
-    int pulse_decay;            /* pulse/ember/nightdrive: percent of brightness kept per 100 ms */
+    int pulse_decay;            /* pulse/ember/nightdrive/beat-pulse: percent of brightness kept per 100 ms */
     int pulse_color;            /* pulse: the wheel colour it pulses in, or -1 for the owner's own colour */
     int pulse_set_car;          /* pulse: also make pulse_color the car's ambient colour (it stays after the music) */
-    int duet_bed, duet_accent;  /* duet: melody bed colour (-1 = auto cool drift) and beat accent (-1 = auto complement) */
-    int drop_style, drop_sensitivity; /* drop: palette style (0=neon, 1=fire, 2=cyber) and drop trigger sensitivity % */
+    int duet_bed, duet_accent, duet_beats; /* duet: melody bed (-1 = wheel), beat accent (-1 = 180 deg complement), beats per pair (0 = locked) */
     int syn_shift;              /* synesthesia: hue rotation in degrees (0..359) */
     int ember_theme;            /* ember: thermal palette (0=fire, 1=plasma, 2=aurora) */
     int drift_theme, drift_beats; /* drift: mood theme (0..4) and musical beats per colour step (2..16) */
@@ -368,6 +367,7 @@ static void load_config(const char *dir) {
     C.enabled = cfg_int("enabled", 1);
     C.debug = cfg_int("debug", 0);
     cfg_str("mode", C.mode, sizeof C.mode, repo ? "spectrum" : "beat");
+    if (!strcmp(C.mode, "drop")) snprintf(C.mode, sizeof C.mode, "synesthesia");
     C.min_interval_ms = clampi(cfg_int("min_interval_ms", repo ? 100 : 50), 20, 5000);
     C.speed_low = clampi(cfg_int("speed_low", 0), 0, 300);
     C.speed_high = clampi(cfg_int("speed_high", 80), 0, 300);
@@ -405,10 +405,9 @@ static void load_config(const char *dir) {
     C.pulse_decay = clampi(cfg_int("pulse_decay", 35), 0, 99);
     C.pulse_color = cfg_color("pulse_color", -1, -2);   /* -1 the car's own colour, -2 the drive-mode colour */
     C.pulse_set_car = cfg_int("pulse_set_car", 0) ? 1 : 0;
-    C.duet_bed = cfg_color("duet_bed", vivid_at_hue(178.0), -1);
+    C.duet_bed = cfg_color("duet_bed", -1, -1);
     C.duet_accent = cfg_color("duet_accent", -1, -1);
-    C.drop_style = clampi(cfg_int("drop_style", 0), 0, 2);
-    C.drop_sensitivity = clampi(cfg_int("drop_sensitivity", 100), 50, 150);
+    C.duet_beats = clampi(cfg_int("duet_beats", C.duet_bed >= 0 ? 0 : 4), 0, 16);
     C.syn_shift = ((cfg_int("syn_shift", 0) % 360) + 360) % 360;
     C.ember_theme = clampi(cfg_int("ember_theme", 0), 0, 2);
     C.drift_theme = clampi(cfg_int("drift_theme", 0), 0, 4);
@@ -444,8 +443,12 @@ static int gauge_mode(void) {
     return !strcmp(C.mode, "speed") || !strcmp(C.mode, "power") || !strcmp(C.mode, "efficiency");
 }
 static int flash_enabled(void) {
-    if (C.flash_on_beat >= 0) return C.flash_on_beat;
-    return !strcmp(C.mode, "beat") || !strcmp(C.mode, "duet") || !strcmp(C.mode, "drop");
+    if (C.flash_on_beat >= 0) return C.flash_on_beat == 1;
+    return !strcmp(C.mode, "beat") || !strcmp(C.mode, "duet");
+}
+static int beat_pulse_enabled(void) {
+    return !C.bright_fixed && C.flash_on_beat == 2
+        && (!strcmp(C.mode, "spectrum") || !strcmp(C.mode, "beat") || !strcmp(C.mode, "synesthesia") || !strcmp(C.mode, "drift"));
 }
 
 /* the app's settings folder, or the shipped defaults until the app has made it */
@@ -528,15 +531,14 @@ static long long now_ms(void) {
 }
 static void show_config(void) {
     say("settings: palette=%s (%s) preset=%s brightness_curve=%s", active_palette, C.palette, C.preset, C.bright_curve);
-    say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz auto_bpm=%d sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms step=%d | pulse_decay=%d | spectrum dynamic=%d margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
+    say("settings: mode=%s brightness %d..%d loudness_range=%ddB | beat %d-%dHz auto_bpm=%d sensitivity=%d%% avg=%dms min=%dms flash=%d/%dms pulse=%d step=%d | pulse_decay=%d | spectrum dynamic=%d margin=%d%% smoothing=%dms bands=\"%s\" | interval=%dms idle=%ds silence=%ddB drive_mode_override=%d",
         C.mode, C.bright_min, C.bright_max, C.loudness_range_db, C.beat_low_hz, C.beat_high_hz, C.auto_bpm, C.sensitivity, C.beat_avg_ms,
-        C.min_beat_ms, flash_enabled(), C.flash_ms, C.beat_step, C.pulse_decay, C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
+        C.min_beat_ms, flash_enabled(), C.flash_ms, beat_pulse_enabled(), C.beat_step, C.pulse_decay, C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
         C.min_interval_ms, C.idle_seconds, C.silence_db, C.override_drive_mode);
-    if (!strcmp(C.mode, "duet")) say("settings: duet bed=%d accent=%d", C.duet_bed, C.duet_accent);
-    if (!strcmp(C.mode, "drop")) say("settings: drop style=%d sensitivity=%d%%", C.drop_style, C.drop_sensitivity);
+    if (!strcmp(C.mode, "duet")) say("settings: duet bed=%d accent=%d beats=%d", C.duet_bed, C.duet_accent, C.duet_beats);
     if (!strcmp(C.mode, "synesthesia")) say("settings: synesthesia shift=%d deg smoothing=%dms", C.syn_shift, C.band_smoothing_ms);
     if (!strcmp(C.mode, "ember")) say("settings: ember theme=%d decay=%d%%", C.ember_theme, C.pulse_decay);
-    if (!strcmp(C.mode, "drift")) say("settings: drift theme=%d beats=%d", C.drift_theme, C.drift_beats);
+    if (!strcmp(C.mode, "drift")) say("settings: drift theme=%d beats=%d fixed=%d", C.drift_theme, C.drift_beats, C.bright_fixed);
     if (!strcmp(C.mode, "nightdrive")) {
         if (!strcmp(C.nd_source, "speed")) say("settings: nightdrive (speed) %d..%d %s = #%d..#%d", C.speed_low, C.speed_high, C.speed_unit, C.speed_color_low, C.speed_color_high);
         else say("settings: nightdrive (power) %d kW = #%d, 0 kW = #%d, %d kW = #%d", C.power_low, C.power_color_low, C.power_color_zero, C.power_high, C.power_color_high);
@@ -1126,12 +1128,9 @@ typedef struct {
     long long bpm_anchor_ms;
     double band_e[MAXBANDS], band_ref[MAXBANDS], band_score[MAXBANDS];
     long long last_band_sw;
-    double mid_env, mid_ref;     /* duet: vocal/harmonic midrange presence (250-4200 Hz) */
+    double mid_env, mid_ref;     /* duet/ember: vocal/harmonic midrange presence (250-4200 Hz) */
+    double spark_prev, spark_fast, spark_slow; /* ember: snare/clap/treble spark transients (250-8000 Hz) */
     double cent_smooth, cent_ref;/* synesthesia: continuous octave spectral centroid */
-    double fast_db, macro_db;    /* drop: short (300 ms) vs macro (6.5 s) song loudness */
-    double hi_fast, hi_slow;     /* drop: high-frequency riser tension (2.2-12 kHz) */
-    int drop_state;              /* drop: 0 = calm/breakdown, 1 = build-up/groove, 2 = full drop */
-    long long drop_until;
     double loud_ref_db;
     double rep_ref;              /* repo curve: running loudness reference (linear, 16-bit units) */
     long long last_beat;
@@ -1141,8 +1140,7 @@ typedef struct {
 typedef struct {
     double db; int beat; int band;
     double beat_ratio, onset_ratio;
-    double mid_norm, pitch_norm, riser_norm;
-    int drop_state;
+    double mid_norm, pitch_norm, spark_norm;
     double band_db[MAXBANDS];
 } Frame;
 
@@ -1155,12 +1153,9 @@ static void ana_init(Ana *a) {
     a->last_band_sw = -100000;
     a->last_beat = -100000;
     a->bpm_anchor_ms = -100000;
-    a->drop_until = -100000;
     a->beat_armed = 1;
     a->cent_smooth = 2.8;
     a->cent_ref = 2.8;
-    a->fast_db = -30;
-    a->macro_db = -30;
     a->loud_ref_db = -30;
     a->rep_ref = 50;
 }
@@ -1474,40 +1469,21 @@ static Frame ana_block(Ana *a, const short *buf, int frames, long long t) {
         f.pitch_norm = clamp01(0.5 + (a->cent_smooth - a->cent_ref) / 2.6);
     }
 
-    /* drop architect macro structure: verse/breakdown (0) vs riser build-up (1) vs full drop (2) */
-    if (f.db > C.silence_db) {
-        if (t < 1200) {
-            a->fast_db += 0.25 * (f.db - a->fast_db);
-            a->macro_db += 0.12 * (f.db - a->macro_db);
-        } else {
-            a->fast_db += (BLOCK_MS / (BLOCK_MS + 300.0)) * (f.db - a->fast_db);
-            a->macro_db += (BLOCK_MS / (BLOCK_MS + 6500.0)) * (f.db - a->macro_db);
+    /* ember snare/clap/treble spark transients (250-8000 Hz) so fire dances between kick drums */
+    {
+        double e_spark = e_mid + 1.8 * band_energy(a->re, a->im, 2200, 8000);
+        double sp_flux = e_spark > a->spark_prev ? e_spark - a->spark_prev : 0.0;
+        a->spark_prev = e_spark;
+        double sp_acc = 0.30 * e_spark + 1.15 * sp_flux;
+        a->spark_fast = sp_acc > a->spark_fast ? sp_acc : 0.55 * a->spark_fast + 0.45 * (0.30 * e_spark);
+        if (f.db > C.silence_db) {
+            double sp_base = 0.35 * e_spark;
+            if (a->spark_slow <= 0) a->spark_slow = sp_base > 1e-12 ? sp_base : 1e-12;
+            else a->spark_slow += (BLOCK_MS / 1600.0) * ((sp_base > 3.0 * a->spark_slow ? 3.0 * a->spark_slow : sp_base) - a->spark_slow);
+            double sr = a->spark_slow > 1e-14 ? a->spark_fast / a->spark_slow : 0.0;
+            f.spark_norm = clamp01((sr - 1.15) / 1.85);
         }
-        double e_hi = band_energy(a->re, a->im, 2200, 12000);
-        if (a->hi_slow <= 0) { a->hi_fast = a->hi_slow = e_hi > 1e-12 ? e_hi : 1e-12; }
-        else {
-            a->hi_fast += (BLOCK_MS / (BLOCK_MS + 350.0)) * (e_hi - a->hi_fast);
-            a->hi_slow += (BLOCK_MS / (BLOCK_MS + 5000.0)) * (e_hi - a->hi_slow);
-        }
-        double db_lift = a->fast_db - a->macro_db;
-        double riser = log2((a->hi_fast + 1e-12) / (a->hi_slow + 1e-12));
-        double bps = a->beat_density / 2.4;
-        double ds = 100.0 / (double)clampi(C.drop_sensitivity, 50, 150);
-        f.riser_norm = clamp01(0.35 + 0.20 * db_lift + 0.28 * riser);
-        if ((db_lift > 1.05 * ds && bps >= 1.10) || (f.beat && f.beat_ratio > 2.15 * ds && db_lift > -0.35 * ds && bps >= 1.20)) {
-            a->drop_state = 2;
-            a->drop_until = t + 2200;
-        } else if (a->drop_state == 2) {
-            if (t >= a->drop_until && (db_lift < -0.75 || bps < 0.55)) a->drop_state = 1;
-        }
-        if (a->drop_state != 2) {
-            if (db_lift < -1.75 || (bps < 0.42 && riser < 0.22)) a->drop_state = 0;
-            else a->drop_state = 1;
-        }
-    } else if (t >= a->drop_until) {
-        a->drop_state = 0;
     }
-    f.drop_state = a->drop_state;
 
     /* spectrum bands (smoothed, boosted, optionally auto-adapted per band); 115 ms dwell prevents LIN mid-fade mud */
     double alpha_b = C.band_smoothing_ms > 0 ? BLOCK_MS / (BLOCK_MS + C.band_smoothing_ms) : 1.0;
@@ -1631,23 +1607,28 @@ static double pulse_env_step(Drv *d, const Ana *a, Frame f, long long t) {
     return d->pulse;
 }
 
+/* 10 perceptually balanced vivid rainbow stops around 360 deg (hits all 6 vivid Hyundai 0x01xx stock colours + rich custom hues) */
+static const double FULL_WHEEL_HUES[10] = {
+    358.0,  38.0,  88.0, 178.0, 209.0, 246.0, 268.0, 287.0, 314.0, 336.0
+};
+
 static double hue_lerp(double a, double b, double x) {
     double d = fmod(b - a + 540.0, 360.0) - 180.0;
     double h = fmod(a + d * x, 360.0);
     return h < 0.0 ? h + 360.0 : h;
 }
 static int ember_wheel_at(int theme, double heat) {
-    /* 4-stop thermal cooling curves (coal -> warm glow -> hot body -> peak flare) */
+    /* 4-stop thermal cooling curves spaced across distinct vivid wheel zones so cooling sweeps visibly */
     static const double stops[3][4] = {
-        {268.0, 355.0,  18.0,  40.0},   /* 0 Fire:   Ember Violet -> Crimson -> Flame Orange -> Marigold Gold */
-        {250.0, 292.0, 210.0, 182.0},   /* 1 Plasma: Deep Indigo -> Vivid Orchid -> Ocean Blue -> Electric Cyan */
-        {225.0, 178.0,  92.0,  40.0}    /* 2 Aurora: Deep Ocean -> Mindful Teal -> Emerald Green -> Marigold Gold */
+        {268.0, 322.0,   6.0,  38.0},   /* 0 Fire:   Dream Purple -> Neon Rose -> Fiery Red -> Marigold Gold */
+        {246.0, 287.0, 209.0, 175.0},   /* 1 Plasma: Royal Indigo -> Vivid Orchid -> Ocean Blue -> Electric Cyan */
+        {246.0, 178.0,  88.0,  38.0}    /* 2 Aurora: Royal Indigo -> Mindful Teal -> Emerald Green -> Marigold Gold */
     };
     const double *s = stops[clampi(theme, 0, 2)];
     double h;
-    if (heat < 0.33) h = hue_lerp(s[0], s[1], heat / 0.33);
-    else if (heat < 0.72) h = hue_lerp(s[1], s[2], (heat - 0.33) / 0.39);
-    else h = hue_lerp(s[2], s[3], (heat - 0.72) / 0.28);
+    if (heat < 0.28) h = hue_lerp(s[0], s[1], heat / 0.28);
+    else if (heat < 0.56) h = hue_lerp(s[1], s[2], (heat - 0.28) / 0.28);
+    else h = hue_lerp(s[2], s[3], (heat - 0.56) / 0.44);
     return vivid_at_hue(h);
 }
 static int drift_wheel_at(int theme, int step) {
@@ -1657,7 +1638,7 @@ static int drift_wheel_at(int theme, int step) {
         { 40.0,  16.0, 356.0, 316.0, 270.0},   /* 2 Sunset:          Gold -> Flame -> Crimson -> Magenta -> Violet */
         {176.0, 192.0, 209.0, 232.0, 256.0}    /* 3 Ocean Deep:      Teal -> Cyan -> Ocean Blue -> Royal Blue -> Indigo */
     };
-    if (theme >= 4 && vivid_n > 0) return vivid_ring[(step * 3) % vivid_n];
+    if (theme >= 4) return vivid_at_hue(FULL_WHEEL_HUES[step % 10]);
     return vivid_at_hue(themes[clampi(theme, 0, 3)][step % 5]);
 }
 
@@ -1671,7 +1652,13 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
     int want_idx = d->idx, want_level = C.bright_min, wr = 0, wg = 0, wb = 0;
     int fms = eff_flash_ms(a);
     int use_flash = flash_enabled() && fms > 0;
-    if (f.beat && (use_flash || !strcmp(C.mode, "duet") || !strcmp(C.mode, "drop")))
+    int use_bpulse = beat_pulse_enabled();
+    int bp_level = C.bright_min;
+    if (use_bpulse) {
+        double bp = pulse_env_step(d, a, f, t);
+        bp_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (bp * bp));
+    }
+    if (f.beat && (use_flash || !strcmp(C.mode, "duet")))
         d->flash_until = t + (fms > 0 ? fms : 120);
     int flashing = t < d->flash_until;
     int flash_ended = d->was_flashing && !flashing;
@@ -1679,16 +1666,27 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
 
     if (!strcmp(C.mode, "spectrum")) {
         if (f.band >= 0) { wr = C.bands[f.band].r; wg = C.bands[f.band].g; wb = C.bands[f.band].b; want_idx = 1000 + f.band; }
-        want_level = (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
+        want_level = C.bright_fixed ? C.bright_max : use_bpulse ? bp_level : (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
     } else if (!strcmp(C.mode, "pulse")) {
         double p = pulse_env_step(d, a, f, t);
         want_idx = C.pulse_color;   /* -1 keeps the user's colour */
         want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (p * p));
     } else if (!strcmp(C.mode, "duet")) {
-        if (f.beat) d->beat_count++;
-        static const double cool_beds[4] = {178.0, 209.0, 92.0, 268.0};
-        int bed = C.duet_bed >= 0 ? C.duet_bed : vivid_at_hue(cool_beds[(d->beat_count / 8) % 4]);
-        int acc = C.duet_accent >= 0 ? C.duet_accent : vivid_at_hue(wheel_hue(bed) + 180.0);
+        if (C.duet_beats > 0) {
+            if (f.beat) {
+                d->beat_count++;
+                d->last_drift_ms = t;
+                if (d->beat_count % C.duet_beats == 0) d->drift_step++;
+            } else if (t - d->last_drift_ms >= 3800) {
+                d->drift_step++;
+                d->last_drift_ms = t;
+            }
+        }
+        int step = C.duet_beats > 0 ? d->drift_step : 0;
+        int bed = C.duet_bed < 0 ? vivid_at_hue(FULL_WHEEL_HUES[(3 + step) % 10])
+                : step == 0 ? C.duet_bed : vivid_at_hue(wheel_hue(C.duet_bed) + step * 36.0);
+        int acc = C.duet_accent < 0 ? vivid_at_hue(wheel_hue(bed) + 180.0)
+                : (step == 0 || C.duet_bed < 0) ? C.duet_accent : vivid_at_hue(wheel_hue(C.duet_accent) + step * 36.0);
         if (flashing) {
             want_idx = acc;
             want_level = C.bright_max;
@@ -1699,46 +1697,22 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
             want_level = C.bright_min + (int)lround((ceil_b - C.bright_min) * f.mid_norm);
         }
         d->idx = want_idx;
-    } else if (!strcmp(C.mode, "drop")) {
-        if (f.beat) d->beat_count++;
-        if (f.drop_state == 2) {   /* Full Drop: high-impact neon leaps + deep blackout valleys */
-            static const double drop_hues[3][6] = {
-                {  0.0,  40.0, 315.0,  92.0, 185.0, 288.0},
-                {  0.0,  20.0,  40.0, 340.0,  12.0, 315.0},
-                {355.0, 315.0, 288.0, 185.0, 235.0, 335.0}
-            };
-            if (f.beat || d->idx < 0) d->idx = vivid_at_hue(drop_hues[C.drop_style][d->beat_count % 6]);
-            want_idx = d->idx;
-            want_level = flashing ? C.bright_max : C.bright_min;
-        } else if (f.drop_state == 1) {   /* Build-Up / Groove: rising tension in both hue and brightness */
-            double h0 = C.drop_style == 1 ? 210.0 : C.drop_style == 2 ? 255.0 : 215.0;
-            double h1 = C.drop_style == 1 ?  38.0 : C.drop_style == 2 ? 320.0 :  25.0;
-            want_idx = vivid_at_hue(hue_lerp(h0, h1, f.riser_norm));
-            int b_lo = C.bright_min > 1 ? C.bright_min : 2;
-            int b_hi = C.bright_max > 3 ? C.bright_max - 2 : C.bright_max;
-            if (b_hi < b_lo) b_hi = b_lo;
-            want_level = b_lo + (int)lround((b_hi - b_lo) * f.riser_norm);
-            if (flashing && want_level + 2 <= C.bright_max) want_level += 2;
-            d->idx = want_idx;
-        } else {   /* Breakdown / Calm Verse: deep cool simmer */
-            static const double calm_hues[4] = {209.0, 245.0, 270.0, 178.0};
-            if (t - d->last_drift_ms >= 3200) { d->drift_step++; d->last_drift_ms = t; }
-            want_idx = vivid_at_hue(calm_hues[d->drift_step % 4]);
-            int simmer_lo = C.bright_min > 1 ? C.bright_min : 1;
-            int simmer_hi = simmer_lo + 2 <= C.bright_max ? simmer_lo + 2 : C.bright_max;
-            want_level = simmer_lo + (int)lround((simmer_hi - simmer_lo) * f.mid_norm);
-            d->idx = want_idx;
-        }
     } else if (!strcmp(C.mode, "synesthesia")) {
         double hue = fmod(C.syn_shift + f.pitch_norm * 285.0, 360.0);
         want_idx = vivid_at_hue(hue);
         d->idx = want_idx;
-        want_level = C.bright_fixed ? C.bright_max : (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
+        want_level = C.bright_fixed ? C.bright_max : use_bpulse ? bp_level : (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
     } else if (!strcmp(C.mode, "ember")) {
-        double heat = pulse_env_step(d, a, f, t);
+        (void)pulse_env_step(d, a, f, t);
+        double spark = 0.74 * f.spark_norm * f.spark_norm + 0.20 * f.mid_norm;
+        if (spark > 0.78) spark = 0.78;
+        if (f.db <= C.silence_db) spark = 0.0;
+        if (t >= d->pulse_hold_until && 0.74 * f.spark_norm * f.spark_norm > d->pulse)
+            d->pulse = 0.74 * f.spark_norm * f.spark_norm;   /* snare/clap transients re-ignite cooling embers */
+        double heat = d->pulse > spark ? d->pulse : spark;
         want_idx = ember_wheel_at(C.ember_theme, heat);
         d->idx = want_idx;
-        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * (heat * heat));
+        want_level = C.bright_min + (int)lround((C.bright_max - C.bright_min) * pow(heat, 1.50));
     } else if (!strcmp(C.mode, "drift")) {
         if (f.beat) {
             d->beat_count++;
@@ -1754,6 +1728,7 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
         want_idx = drift_wheel_at(C.drift_theme, d->drift_step);
         d->idx = want_idx;
         if (C.bright_fixed) want_level = C.bright_max;
+        else if (use_bpulse) want_level = bp_level;
         else if (use_flash) want_level = flashing ? C.bright_max : C.bright_min;
         else {
             want_level = loud_level(a, d->sent_level, f.db);
@@ -1773,7 +1748,7 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
     } else {   /* beat */
         if (f.beat) d->idx = wheel_next(d->idx, C.beat_step);
         want_idx = d->idx;
-        want_level = (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
+        want_level = C.bright_fixed ? C.bright_max : use_bpulse ? bp_level : (use_flash && flashing) ? C.bright_max : use_flash ? C.bright_min : loud_level(a, d->sent_level, f.db);
     }
     if (want_idx >= 0 && want_idx < wheel_n) { wr = WHEEL_R[want_idx]; wg = WHEEL_G[want_idx]; wb = WHEEL_B[want_idx]; }
     d->want_r = wr; d->want_g = wg; d->want_b = wb; d->want_level = want_level;
@@ -1782,12 +1757,11 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
     if (pending_pid) return;   /* a service call (no helper) still in flight: one at a time */
 
     /* on a beat peak or trough drop, send down to BEAT_GUARD_MS so peaks and dark valleys aren't clipped */
-    int pulse_like = !strcmp(C.mode, "pulse") || !strcmp(C.mode, "ember") || !strcmp(C.mode, "nightdrive");
-    int fast_col_mode = !strcmp(C.mode, "duet") || (!strcmp(C.mode, "drop") && f.drop_state == 2);
+    int pulse_like = !strcmp(C.mode, "pulse") || !strcmp(C.mode, "ember") || !strcmp(C.mode, "nightdrive") || use_bpulse;
+    int fast_col_mode = !strcmp(C.mode, "duet");
     int beat_iv = C.min_interval_ms < BEAT_GUARD_MS ? C.min_interval_ms : BEAT_GUARD_MS;
     int base_col_iv = C.min_interval_ms;
     if (!strcmp(C.mode, "synesthesia") && base_col_iv < 110) base_col_iv = 110;
-    else if (!strcmp(C.mode, "ember") && base_col_iv < 65) base_col_iv = 65;
     int col_iv = (f.beat || (fast_col_mode && flash_ended)) ? beat_iv : base_col_iv;
     int key = want_idx < 0 ? -1 : ((wr & 0x1ff) << 18) | ((wg & 0x1ff) << 9) | (wb & 0x1ff);
     if (key >= 0 && key != d->sent_idx && t - d->last_color >= col_iv) {
@@ -1799,7 +1773,7 @@ static void drive(Drv *d, Ana *a, Frame f, long long t) {
         }
         if (pending_pid) return;   /* through service call: the brightness waits its turn */
     }
-    int flash_like = use_flash || !strcmp(C.mode, "duet") || (!strcmp(C.mode, "drop") && f.drop_state == 2);
+    int flash_like = use_flash || !strcmp(C.mode, "duet");
     int snap_bright = (f.beat && (flashing || pulse_like)) || (flash_like && flash_ended) || ((flash_like || pulse_like) && want_level == C.bright_min);
     int br_iv = snap_bright ? beat_iv : C.min_interval_ms;
     if (want_level != d->sent_level && t - d->last_bright >= br_iv) {
@@ -2379,16 +2353,16 @@ static void tune_start(int srate) {
         "product=%s\nname=%s\npalette=%s (setting=%s)\n"
         "mode=%s\npreset=%s\nbrightness=%d..%d (fixed=%d, curve=%s, range_db=%d, dim=%d)\n"
         "auto_bpm=%d\nsensitivity=%d\nbeat_hz=%d-%d\nbeat_avg_ms=%d\nmin_beat_ms=%d\n"
-        "flash_enabled=%d\nflash_ms=%d\nbeat_step=%d\nskip_white=%d\npulse_decay=%d\npulse_color=%d\n"
-        "duet=%d,%d\ndrop=%d,%d\nsyn_shift=%d\nember_theme=%d\ndrift=%d,%d\nnd_source=%s\n"
+        "flash_enabled=%d\nbeat_pulse=%d\nflash_ms=%d\nbeat_step=%d\nskip_white=%d\npulse_decay=%d\npulse_color=%d\n"
+        "duet=%d,%d,%d\nsyn_shift=%d\nember_theme=%d\ndrift=%d,%d\nnd_source=%s\n"
         "spectrum_dynamic=%d\nswitch_margin=%d\nband_smoothing_ms=%d\nbands=%s\n"
         "min_interval_ms=%d\nsilence_db=%d\n",
         VERSION, stamp_str, srate,
         prod[0] ? prod : "?", pname[0] ? pname : "?", active_palette, C.palette,
         C.mode, C.preset, C.bright_min, C.bright_max, C.bright_fixed, C.bright_curve, C.loudness_range_db, C.gauge_dim,
         C.auto_bpm, C.sensitivity, C.beat_low_hz, C.beat_high_hz, C.beat_avg_ms, C.min_beat_ms,
-        flash_enabled(), C.flash_ms, C.beat_step, C.skip_white, C.pulse_decay, C.pulse_color,
-        C.duet_bed, C.duet_accent, C.drop_style, C.drop_sensitivity, C.syn_shift, C.ember_theme, C.drift_theme, C.drift_beats, C.nd_source,
+        flash_enabled(), beat_pulse_enabled(), C.flash_ms, C.beat_step, C.skip_white, C.pulse_decay, C.pulse_color,
+        C.duet_bed, C.duet_accent, C.duet_beats, C.syn_shift, C.ember_theme, C.drift_theme, C.drift_beats, C.nd_source,
         C.spectrum_dynamic, C.switch_margin, C.band_smoothing_ms, C.bands_text,
         C.min_interval_ms, C.silence_db);
     if (base.valid && hn > 0 && hn < (int)sizeof tune.sess_hdr - 80) {
@@ -3212,8 +3186,7 @@ int main(int argc, char **argv) {
                 f.band = fn.band;
                 f.mid_norm = fn.mid_norm;
                 f.pitch_norm = fn.pitch_norm;
-                f.riser_norm = fn.riser_norm;
-                f.drop_state = fn.drop_state;
+                if (fn.spark_norm > f.spark_norm) f.spark_norm = fn.spark_norm;
                 memcpy(f.band_db, fn.band_db, sizeof f.band_db);
             }
             meter(&mtr, &a, f, t);

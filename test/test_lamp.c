@@ -733,12 +733,25 @@ int main(void) {
         }
         assert(fabs(asub.bpm - 115.0) < 2.5 && asub.bpm_conf > 0.35);
 
-        /* 7. All 6 new single-zone visualizer modes on Hyundai Ioniq 5 palette (Duet, Drop, Synesthesia, Ember, Drift, Night Drive) */
+        /* 7. Visualizer modes on Hyundai Ioniq 5 palette (legacy drop migration, Duet pair walk, Synesthesia, Ember sparks, Phase Drift, Phase Pulse, Night Drive) */
+        {   /* Legacy mode=drop config migrates cleanly to synesthesia */
+            char saved_svc[sizeof C.service_bin], saved_lc[sizeof C.logcat_bin], mdir[128], mfile[160];
+            snprintf(saved_svc, sizeof saved_svc, "%s", C.service_bin);
+            snprintf(saved_lc, sizeof saved_lc, "%s", C.logcat_bin);
+            snprintf(mdir, sizeof mdir, "%s/mig", lamp_dir);
+            mkdir(mdir, 0755);
+            snprintf(mfile, sizeof mfile, "%s/mode", mdir);
+            write_file(mfile, "drop\n");
+            load_config(mdir);
+            assert(!strcmp(C.mode, "synesthesia"));
+            snprintf(C.service_bin, sizeof C.service_bin, "%s", saved_svc);
+            snprintf(C.logcat_bin, sizeof C.logcat_bin, "%s", saved_lc);
+        }
         set_palette("hyundai");
         C.min_interval_ms = 20; C.bright_min = 1; C.bright_max = 10; C.flash_ms = 110; C.flash_on_beat = -1; C.bright_fixed = 0;
-        {   /* Duet: Mindful Teal (#68) bed modulated by midrange between beats, opposite 180 deg accent flash at max on beat */
+        {   /* Duet locked (duet_beats=0) & beat-synced pair walk (duet_beats=2) */
             snprintf(C.mode, sizeof C.mode, "duet");
-            C.duet_bed = 68; C.duet_accent = -1;
+            C.duet_bed = 68; C.duet_accent = -1; C.duet_beats = 0;
             memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = 68;
             Frame fd = {0}; fd.db = -18; fd.beat = 1; fd.mid_norm = 0.6;
             drive(&d, &asub, fd, 1000);
@@ -747,25 +760,21 @@ int main(void) {
             fd.beat = 0;
             drive(&d, &asub, fd, 1250);
             assert(d.want_r == WHEEL_R[68] && d.sent_level >= 1 && d.sent_level <= 6);
-        }
-        {   /* Drop: breakdown (0) -> rising build-up (1) -> full neon drop (2) */
-            snprintf(C.mode, sizeof C.mode, "drop");
-            C.drop_style = 0; C.drop_sensitivity = 100; C.bright_min = 0; C.bright_max = 10;
-            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1; d.idx = -1;
-            Frame fd = {0}; fd.db = -24; fd.drop_state = 0; fd.mid_norm = 0.4;
-            drive(&d, &asub, fd, 1000);
-            assert(d.want_level >= 1 && d.want_level <= 3);
-            fd.drop_state = 1; fd.riser_norm = 0.85;
-            drive(&d, &asub, fd, 1100);
-            int build_lvl = d.want_level;
-            assert(build_lvl >= 6 && build_lvl <= 8);
-            fd.drop_state = 2; fd.beat = 1;
-            drive(&d, &asub, fd, 1200);
-            assert(d.want_level == 10);
-            fd.beat = 0;
-            drive(&d, &asub, fd, 1400);
-            assert(d.want_level == 0);   /* deep blackout valley between drop beats */
-            C.bright_min = 1;
+
+            /* Beat-synced pair walk: steps complementary bed+accent pair around FULL_WHEEL_HUES every 2 beats */
+            C.duet_bed = -1; C.duet_accent = -1; C.duet_beats = 2;
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+            fd.beat = 0; drive(&d, &asub, fd, 2000);
+            int bed0 = d.idx;
+            fd.beat = 1; drive(&d, &asub, fd, 2100);   /* beat 1: stays on pair 0, flashes complement */
+            int acc0 = d.idx;
+            fd.beat = 0; drive(&d, &asub, fd, 2300);
+            assert(d.idx == bed0 && acc0 != bed0);
+            fd.beat = 1; drive(&d, &asub, fd, 2500);   /* beat 2: advances to pair 1! */
+            int acc1 = d.idx;
+            fd.beat = 0; drive(&d, &asub, fd, 2700);
+            int bed1 = d.idx;
+            assert(bed0 == 68 && bed1 == 67 && acc1 != acc0);   /* Mindful Teal (#68) pair -> Ocean Blue (#67) pair */
         }
         {   /* Synesthesia: continuous pitch centroid maps 90 Hz bass vs 3200 Hz lead to distinct vivid colours */
             snprintf(C.mode, sizeof C.mode, "synesthesia");
@@ -795,27 +804,53 @@ int main(void) {
             assert(fs.pitch_norm > 0.70 && low_idx != high_idx && wheel_saturated(low_idx) && wheel_saturated(high_idx));
             C.flash_on_beat = -1;
         }
-        {   /* Ember: beat ignites Marigold Gold flare (#70 on Fire theme) and cools to violet coal as envelope decays */
+        {   /* Ember: beat ignites Marigold Gold flare (#70), cools through crimson/rose to purple, and snare spark re-ignites! */
             snprintf(C.mode, sizeof C.mode, "ember");
-            C.ember_theme = 0; C.pulse_decay = 45;
+            C.ember_theme = 0; C.pulse_decay = 38;
             memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
             Frame fe = {0}; fe.db = -16; fe.beat = 1; fe.onset_ratio = 3.0;
             drive(&d, &asub, fe, 2000);
             assert(d.idx == 70 && d.sent_level == 10);   /* Fire peak flare hits #70 Marigold Gold! */
             fe.beat = 0; fe.onset_ratio = 0;
-            for (long long te = 2120; te <= 2600; te += 20) drive(&d, &asub, fe, te);
-            assert(d.idx != 70 && d.sent_level == 1);
+            int cool_idx = ember_wheel_at(0, 0.0), mid_seen = 0;
+            for (long long te = 2120; te <= 3400; te += 20) {
+                drive(&d, &asub, fe, te);
+                if (d.idx != 70 && d.idx != cool_idx) mid_seen = 1;   /* sweeps through intermediate crimson/rose stops */
+            }
+            assert(mid_seen && d.idx == cool_idx && d.sent_level == 1);
+            fe.spark_norm = 0.92;                        /* off-beat snare/clap transient re-ignites cooled ember! */
+            drive(&d, &asub, fe, 3460);
+            assert(d.idx != cool_idx && d.sent_level >= 5);
         }
-        {   /* Phrase Drift: holds mood colour for drift_beats=4 beats, steps cleanly on beat 4 with downbeat swell */
+        {   /* Phase Drift (8-beat steady) & Phase Pulse (2-beat Full Wheel + smooth beat-pulse brightness) */
             snprintf(C.mode, sizeof C.mode, "drift");
-            C.drift_theme = 0; C.drift_beats = 4; C.flash_on_beat = 0;
+            C.drift_theme = 0; C.drift_beats = 8; C.bright_fixed = 1; C.bright_min = 10; C.bright_max = 10; C.flash_on_beat = 0;
             memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
             Frame fdr = {0}; fdr.db = -18; fdr.beat = 1;
-            drive(&d, &asub, fdr, 1000); int c1 = d.idx;
-            drive(&d, &asub, fdr, 1500); int c2 = d.idx;
-            drive(&d, &asub, fdr, 2000); int c3 = d.idx;
-            drive(&d, &asub, fdr, 2500); int c4 = d.idx;
-            assert(c1 == c2 && c2 == c3 && c4 != c1 && c1 == 69);   /* Forest & Aurora starts on #69 Emerald Green! */
+            for (int b = 1; b <= 7; b++) drive(&d, &asub, fdr, 1000 + b * 400LL);
+            int c7 = d.idx;
+            drive(&d, &asub, fdr, 4200);
+            int c8 = d.idx;
+            assert(c7 == 69 && c8 != 69 && d.want_level == 10);   /* holds #69 Emerald for 7 beats, steps on beat 8 at steady 10 */
+
+            /* Phase Pulse: Full Wheel (theme 4) visits all 6 vivid Hyundai stock colours + beat-pulse brightness (flash_on_beat=2) */
+            C.drift_theme = 4; C.drift_beats = 2; C.bright_fixed = 0; C.bright_min = 1; C.bright_max = 10; C.flash_on_beat = 2; C.pulse_decay = 40;
+            int seen_stock = 0;
+            for (int st = 0; st < 10; st++) {
+                int w = drift_wheel_at(4, st);
+                assert(wheel_saturated(w));
+                if (w >= 67) seen_stock++;
+            }
+            assert(seen_stock >= 6);
+            memset(&d, 0, sizeof d); d.sent_idx = d.sent_level = -1;
+            fdr.beat = 1; drive(&d, &asub, fdr, 5000);
+            int p0 = d.idx;
+            assert(d.sent_level == 10);
+            fdr.beat = 0;
+            for (long long tp = 5120; tp <= 5400; tp += 20) drive(&d, &asub, fdr, tp);
+            assert(d.idx == p0 && d.sent_level < 6);     /* brightness pulses down smoothly between beats */
+            fdr.beat = 1; drive(&d, &asub, fdr, 5500);   /* beat 2 steps Full Wheel colour and pulses back to 10! */
+            assert(d.idx != p0 && d.sent_level == 10);
             C.flash_on_beat = -1;
         }
         {   /* Night Drive: EV regen/cruise/power drives colour (#69 -> #67 -> #22) while music beats pulse brightness */

@@ -21,9 +21,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.4-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.5-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.4.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.5.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -32,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.4-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.5-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -53,14 +53,16 @@ Every change applies right away.
 The app follows the head unit's light and dark themes.
 
 - **On/Off** switches the effect off without uninstalling the mod.
-- **Presets:** Lively (the default), Intense, Marigold, Contrast, Bold Flash, Glow, Epic, Duet, Drop,
-  Synesthesia, Ember, Phrase Drift, Night Drive, Speed, Power and Efficiency. Tap one to use it. If you
-  switch presets with unsaved changes, the app asks whether to save them, save them as a new preset, or
-  discard them.
+- **Presets:** Synesthesia (the default), Phase Pulse, Phase Drift, Duet, Ember, Night Drive, Lively,
+  Intense, Bold Flash, Glow, Epic, Speed, Power and Efficiency. Tap one to use it. If you switch presets
+  with unsaved changes, the app asks whether to save them, save them as a new preset, or discard them.
 - **Tabs:** every mode has **Color**, **Brightness** and **Tuning** tabs.
 
 ### Music & hybrid modes
 
+- **Synesthesia** maps continuous log-frequency spectral centroid (55 Hz–8 kHz) directly to colour
+  hue, gliding smoothly from deep bass hues through vocal mids to bright highs, with a live **Color
+  rotation** slider.
 - **Spectrum** gives each sound band its own colour: tap a band, then a colour. **+** splits the
   selected band in two (up to 8 bands), and **−** removes it, with its neighbour taking over its range.
   A 115 ms minimum dwell lets the car's LIN lamp finish each colour transition cleanly without mid-fade mud.
@@ -70,27 +72,23 @@ The app follows the head unit's light and dark themes.
   colours, which change live as you switch Eco, Normal and Sport. Picking Drive Mode turns on the car's
   **Link to Drive Mode** setting, and picking any other colour turns it off, so the colour shows.
   **Set as ambient light color** also makes the picked colour your car's own ambient colour.
-- **Duet** layers two musical roles onto one lamp: a smooth midrange/vocal **Melody Bed** (picked or
-  auto-drifting every 8 beats) punctuated by crisp **Beat Accent** flashes in the 180° opposite
-  complementary colour (or any picked colour).
-- **Drop** tracks macro song dynamics across breakdowns (calm cool simmer), rising build-ups (climbing
-  hue and brightness tension), and full drops (high-impact neon colour leaps with deep dark valleys),
-  with **Full Neon**, **Cool to Fire** and **Cyberpunk** palettes.
-- **Synesthesia** maps continuous log-frequency spectral centroid (55 Hz–8 kHz) directly to colour
-  hue, gliding smoothly from deep bass hues through vocal mids to bright highs, with a live **Color
-  rotation** slider.
-- **Ember** models thermal glow: each beat ignites a bright hot flare that cools through rich glowing
-  embers (**Fire**, **Plasma** or **Aurora**) as the note decays.
-- **Drift** holds curated mood colours (**Forest & Aurora**, **Cyberpunk**, **Sunset**, **Ocean Deep**
-  or **Full Wheel**) across whole musical bars (**Beats per color**, default 4) with a subtle downbeat
-  brightness swell.
+- **Duet** layers two musical roles onto one lamp: a smooth midrange/vocal **Melody Bed** punctuated
+  by crisp **Beat Accent** flashes in the 180° opposite complementary colour (or any picked colour),
+  with a **Pair walk** slider (`Off`, `every beat`, or `2–16 beats`) that steps complementary pairs
+  around the wheel on beat.
+- **Ember** models thermal glow with percussion sparks: each beat ignites a bright hot flare while
+  snare and clap transients (250 Hz–8 kHz) re-ignite cooling embers across **Fire**, **Plasma** or
+  **Aurora** gradients.
+- **Phase Drift** steps through curated mood palettes (**Forest & Aurora**, **Cyberpunk**, **Sunset**,
+  **Ocean Deep**) or the **Full Wheel** every **Beats per color** (`2–16` beats)—from steady 8-beat
+  night-highway mood shifts (**Phase Drift**) to energetic 2-beat rainbow beat-pulses (**Phase Pulse**).
 - **Night Drive** fuses EV driving telemetry with music: **Motor Power & Regen** (emerald green on
   regen, ocean blue cruising, red under throttle) or **Vehicle Speed** sets the colour while music
   beats pulse the brightness—and when music is paused, it cruises calmly at your telemetry colour.
 - **Brightness:** **Follow the music** sets a range (`0` to `10`, where `0` turns the lamp completely off
-  between hits for full strobe contrast) that the brightness moves within, either with the **Average
-  loudness** or with a crisp **Flash on beat**. **Fixed level** keeps one brightness. **Dimmed in Dark**
-  is the car's own setting, on every mode.
+  between hits for full strobe contrast) that the brightness moves within, by **Average loudness**,
+  smooth **Beat pulse** envelope, or crisp **Flash on beat**. **Fixed level** keeps one brightness.
+  **Dimmed in Dark** is the car's own setting, on every mode.
 - **Tuning:** how quickly colours change (down to 20 ms), how easily they switch, **Auto-adapt** vs
   **Manual only** band sensitivity in Spectrum, **Auto BPM (tempo sync)** vs **Manual timing** (using a
   3-band log-spectral comb tracker with CarPlay track-skip silence reset), and **Record 20s clip
@@ -117,7 +115,7 @@ the slider's **Now** shows the current reading.
 
 ### Presets
 
-- **+ New preset**, at the end of the list, starts a preset from Lively as it came. **Save** keeps
+- **+ New preset**, at the end of the list, starts a preset from Synesthesia as it came. **Save** keeps
   your changes in the current preset, and **Save as…** copies them to a new one. Presets can have
   any name.
 - **Reset modified presets** appears automatically whenever any built-in preset has saved overrides,
