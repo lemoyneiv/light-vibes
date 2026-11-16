@@ -8,7 +8,7 @@ public class ReportTest {
         if (!ok) throw new AssertionError(what);
     }
 
-    static final String BASE = "stage=done\nv=0.6.8\nproduct=NEEV.USA.0000.V015.012.260507\nname=x\nusm=0\nhmg=1.1.0\nmods=auto-dst,nemesis-shortcut,wireless-carplay-aa\n"
+    static final String BASE = "stage=done\nv=0.6.9\nproduct=NEEV.USA.0000.V015.012.260507\nname=x\nusm=0\nhmg=1.1.0\nmods=auto-dst,nemesis-shortcut,wireless-carplay-aa\n"
             + "mode=synesthesia\nenabled=1\nrange=1-10\nloop=on\nrate=0\nsongs=4\npeak=-14\nsilence=-55\nsent=120/88\nchk=3/0/0/0\nsvc=00000000\nreply=1\nuser=382,471,277,7,1\ndim=1\nc=3/3\ndm=1\nb=3/3\nrestored=1\n";
 
     public static void main(String[] a) throws Exception {
@@ -35,7 +35,7 @@ public class ReportTest {
 
         check(seenNot.title().equals("colour not changing on NEEV"), seenNot.title());
         String sum = ok.summary();
-        check(sum.contains("LV 0.6.8") && sum.contains("user 382,471,277,7,1"), sum);
+        check(sum.contains("LV 0.6.9") && sum.contains("user 382,471,277,7,1"), sum);
         check(!sum.contains("github.com"), sum);
         System.out.println("report summary " + sum.length() + " characters; report tests passed");
     }

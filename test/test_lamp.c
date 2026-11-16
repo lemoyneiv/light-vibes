@@ -25,10 +25,8 @@ static const char *FAKE_SERVICE =
 "case $3 in\n"
 " 76) answer ;;\n"
 " 77) if [ $5 = 5 ]; then [ \"$LAMP_MODE\" = ignore_bright ] || br=$7;\n"
-"     elif [ $5 = 9 ]; then dm=$7; if [ \"$LAMP_MODE\" = preset_mode3 ] && [ $7 = 2 ]; then r=3; g=199; b=192; fi\n"
+"     elif [ $5 = 9 ]; then dm=$7;\n"
 "     elif [ $5 = 8 ]; then dim=$7;\n"
-"     elif [ \"$LAMP_MODE\" = preset_mode3 ] && [ $5 = 3 ]; then\n"
-"       case $7 in 1) r=382; g=471; b=277;; 2) r=259; g=455; b=448;; 3) r=510; g=424; b=273;; esac\n"
 "     fi ;;\n"
 " 78) if [ \"$LAMP_MODE\" != ignore_colour ]; then r=$(dec $7); g=$(dec ${11}); b=$(dec ${15}); fi ;;\n"
 "esac\n"
@@ -513,10 +511,10 @@ int main(void) {
     diag_flush("done");
     rf = fopen(target, "r"); assert(rf && fgets(l1, sizeof l1, rf)); assert(!strcmp(l1, "keep\n")); fclose(rf);
 
-    /* ---------- stock color capture (snap & watch) and MICOM preset probe ---------- */
+    /* ---------- stock color capture (snap & watch) ---------- */
     {
         usb_roots[0] = usb; usb_any_folder = 1;
-        diag_watch_ms = 2; diag_probe_ms = 1;
+        diag_watch_ms = 2;
         char stf[260], logf[260], nf[260], v3[512], cap_usb[320];
         snprintf(stf, sizeof stf, "%s/state", lamp_dir);
         snprintf(logf, sizeof logf, "%s/log", lamp_dir);
@@ -549,31 +547,12 @@ int main(void) {
         assert(!strcmp(result_value("stage", v3, sizeof v3), "watch_done"));
         assert(!strcmp(result_value("watch_count", v3, sizeof v3), "2"));
         assert(!strcmp(result_value("items", v3, sizeof v3), "3,199,192,5,1,2;382,471,277,5,1,1"));
-
-        /* 3. MICOM setSMLConfiguration preset probe discovers mode 9 (Drive Mode) + mode 3 presets (data=1..3), writes USB log, and restores baseline */
-        setenv("LAMP_MODE", "preset_mode3", 1);
-        write_file(stf, "r=255 g=68 b=35 br=4 dm=1 dim=2\n");
-        write_file(logf, ""); write_file(nf, "0\n"); memset(lamp_stamp, 0, sizeof lamp_stamp);
-        remove(light_state_path);
-        write_file(dpath, "probe\n");
-        assert(diag_poll() == 1);
-        diag_dispatch();
-        assert(diag_poll() == 0);
-        assert(!strcmp(result_value("stage", v3, sizeof v3), "probe_done"));
-        assert(!strcmp(result_value("found", v3, sizeof v3), "4"));
-        assert(!strcmp(result_value("restored", v3, sizeof v3), "1"));
-        assert(strstr(result_value("usb", v3, sizeof v3), "Light Vibes reports/micom-preset-probe-"));
-
-        char st_after[120];
-        FILE *sf = fopen(stf, "r"); assert(sf && fgets(st_after, sizeof st_after, sf)); fclose(sf);
-        assert(!strcmp(st_after, "r=255 g=68 b=35 br=4 dm=1 dim=2\n"));
         assert(saved_load(s) && s[5] == 0);
 
         FILE *cf = fopen(cap_usb, "r"); assert(cf);
         char cap_all[4096]; size_t cn = fread(cap_all, 1, sizeof cap_all - 1, cf); fclose(cf);
         cap_all[cn] = 0;
         assert(strstr(cap_all, "source=manual") && strstr(cap_all, "source=auto#2"));
-        assert(strstr(cap_all, "source=probe_drive_mode") && strstr(cap_all, "source=probe_m3_d3"));
     }
 
     /* ---------- zero-lag beat onset, Beat wheel permutation, Flash blackout, Pulse envelope, and Spectrum auto-adapt ---------- */

@@ -21,9 +21,9 @@ ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.8-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.9-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.8.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.9.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -32,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.8-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.9-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -166,7 +166,6 @@ Open **⋮ > LED testing & color capture** at the top of the left preset rail wh
 - **15-second LED & brightness test:** cycles Red, Green and Blue, then Low (`1`), High (`10`) and Mid (`5`) brightness while listing each step live, restores your own ambient colour and brightness, shows an on-screen diagnosis, and saves `light-vibes-report-YYYYMMDD-HHMM.txt` to USB (also kept locally at `/data/hmgapi/public/light-vibes/report.txt`).
 - **Capture current:** reads the lamp's live 16-bit RGB (`0x01xx` stock or wheel), brightness, Dimmed-in-Dark and Drive Mode link in ~0.4 s, displays a live swatch on screen, and appends a timestamped line to `Light Vibes reports/captured-colors.txt` on USB.
 - **Auto-capture:** polls `SYS_SML_STATUS_M_RESP` at 1 Hz in the background so you can switch to the car's native **Ambient Light** menu and tap through stock swatches—or cycle **Eco / Normal / Sport** Drive Modes—and automatically log every unique colour to `captured-colors.txt` on USB.
-- **Probe presets:** runs a safe two-stage scan of `com.hkmc.micom.system` `setSMLConfiguration(mode, data)` (checking Drive Mode link `mode=9, data=2` and candidate preset modes), writes `micom-preset-probe-YYYYMMDD-HHMM.txt` plus any discovered colours to `captured-colors.txt` on USB, and restores your exact baseline colour and brightness afterward.
 
 ## How it works
 
@@ -209,8 +208,8 @@ package. tinyalsa is cloned into `third_party/` at a pinned commit.
 HMGAPI_DIR=../HMG-API ./build.sh
 ```
 
-This writes the two release files to `dist/`, along with `light-vibes-v0.6.8.hmgapi.zip`, the signed
-mod inside them, and `light-vibes-v0.6.8-nemesis-package.zip`, the file to upload to the NEMESIS
+This writes the two release files to `dist/`, along with `light-vibes-v0.6.9.hmgapi.zip`, the signed
+mod inside them, and `light-vibes-v0.6.9-nemesis-package.zip`, the file to upload to the NEMESIS
 Package Store. It signs the mod with `~/.hmgapi/author.key` and the app with
 `~/.hmgapi/light-vibes-app.keystore`, which it makes on the first build. Updates must be signed with
 the same keys as the first install.

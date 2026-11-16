@@ -956,7 +956,7 @@ public class MainActivity extends Activity {
         LinearLayout foot = new LinearLayout(this);
         foot.setGravity(Gravity.CENTER_VERTICAL);
         foot.setPadding(0, dp(10), 0, 0);
-        TextView credit = text("Light Vibes v0.6.8 · Kyle (dibble9012) & lemoyneiv", 11.5f, MUTED);
+        TextView credit = text("Light Vibes v0.6.9 · Kyle (dibble9012) & lemoyneiv", 11.5f, MUTED);
         credit.setSingleLine(true);
         credit.setEllipsize(TextUtils.TruncateAt.END);
         foot.addView(credit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));

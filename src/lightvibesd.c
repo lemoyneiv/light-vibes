@@ -56,7 +56,7 @@
 #include <pthread.h>
 #include <tinyalsa/asoundlib.h>
 
-#define VERSION "0.6.8"
+#define VERSION "0.6.9"
 #define MAX_RATE 48000
 static int rate = MAX_RATE;   /* the capture side only runs at the rate playback is using */
 #define SOURCE_START_MS 2000  /* Android-mixer audio must last this long: it also carries short system sounds */
@@ -2437,9 +2437,8 @@ static void diag_save(const char *req) {
     dkv("usb", "%s", usb);
     diag_flush("saved");
 }
-enum { DIAG_NONE = 0, DIAG_TEST = 1, DIAG_SNAP = 2, DIAG_WATCH = 3, DIAG_PROBE = 4 };
+enum { DIAG_NONE = 0, DIAG_TEST = 1, DIAG_SNAP = 2, DIAG_WATCH = 3 };
 static int diag_watch_ms = 900;        /* background color watch cadence; tests set this small */
-static int diag_probe_ms = 250;        /* per-step settle delay during MICOM preset probe */
 static int diag_watch_max_polls = 700; /* ~10.5 min safety cap so watch never hangs forever */
 
 static void append_captured_color(int r, int g, int b, int br, int dim, int dm, const char *src, char *usb_out, size_t usb_sz) {
@@ -2580,7 +2579,6 @@ static void diag_watch(void) {
                 if (!strncmp(req, "watch stop", 10)) { stop_watch = 1; break; }
                 if (!strncmp(req, "test", 4)) { diag_pending = DIAG_TEST; base.valid = 0; return; }
                 if (!strncmp(req, "snap", 4)) { diag_pending = DIAG_SNAP; base.valid = 0; return; }
-                if (!strncmp(req, "probe", 5)) { diag_pending = DIAG_PROBE; base.valid = 0; return; }
             }
         }
         if (stop_watch) break;
@@ -2596,199 +2594,17 @@ static void diag_watch(void) {
     say("auto-capture watch ended (%d unique color(s))", nseen);
 }
 
-static void probe_log(char *buf, size_t cap, size_t *len, const char *fmt, ...) {
-    if (!buf || *len + 2 >= cap) return;
-    va_list ap; va_start(ap, fmt);
-    int n = vsnprintf(buf + *len, cap - *len, fmt, ap);
-    va_end(ap);
-    if (n > 0) *len += (size_t)n < cap - 1 - *len ? (size_t)n : cap - 1 - *len;
-}
-
-static void diag_probe(void) {
-    diag_pending = 0;
-    diag_len = 0; diag_buf[0] = 0;
-    say("MICOM setSMLConfiguration preset probe starting");
-    wait_pending();
-    check_cancel();
-
-    int dummy[6] = {0}, l[6] = {0};
-    lamp_last_status(dummy);
-    int reply = read_lamp(l) && lamp_fresh;
-    base.valid = 0;
-    snapshot_base();
-    if (!reply || !base.valid) {
-        dkv("reply", "0");
-        dkv("found", "0");
-        dkv("usb", "none");
-        base.valid = 0;
-        diag_flush("probe_done");
-        return;
-    }
-    int want[6] = {base.r, base.g, base.b, base.bright_raw, base.drive_mode, base.dim};
-    saved_write(1);     /* mark dirty while probing so a power loss mid-probe restores on next boot */
-
-    size_t rcap = 24576, rlen = 0;
-    char *rep = malloc(rcap);
-    if (rep) rep[0] = 0;
-    probe_log(rep, rcap, &rlen, "Light Vibes MICOM setSMLConfiguration Preset Probe (v%s)\n", VERSION);
-    probe_log(rep, rcap, &rlen, "Baseline: rgb=%d,%d,%d (0x%04X,0x%04X,0x%04X) bright_raw=%d dim=%d drive_mode=%d\n\n",
-              want[0], want[1], want[2], want[0] & 0xffff, want[1] & 0xffff, want[2] & 0xffff, want[3], want[5], want[4]);
-
-    int found[64][6], nfound = 0;
-    char last_usb[200] = "none", items[900];
-    int aborted = 0;
-
-    /* Step 1: check active Drive Mode color (mode=9, data=2) */
-    diag_len = 0; diag_buf[0] = 0;
-    dkv("probe_step", "drive-mode link (mode 9)");
-    diag_flush("probing");
-    light_config(9, 2, 1);
-    usleep(diag_probe_ms * 1000);
-    if (read_lamp(l) && lamp_fresh) {
-        probe_log(rep, rcap, &rlen, "mode=9 data=2 (drive-mode on) -> rgb=%d,%d,%d (0x%04X,0x%04X,0x%04X) br=%d dim=%d dm=%d\n",
-                  l[0], l[1], l[2], l[0] & 0xffff, l[1] & 0xffff, l[2] & 0xffff, l[3], l[5], l[4]);
-        if ((l[0] != want[0] || l[1] != want[1] || l[2] != want[2]) && nfound < 64) {
-            found[nfound][0] = l[0]; found[nfound][1] = l[1]; found[nfound][2] = l[2];
-            found[nfound][3] = l[3]; found[nfound][4] = l[5]; found[nfound][5] = 2;
-            nfound++;
-            append_captured_color(l[0], l[1], l[2], l[3], l[5], 2, "probe_drive_mode", last_usb, sizeof last_usb);
-        }
-    }
-    light_config(9, 1, 1);
-    light_rgb(want[0], want[1], want[2], 1);
-    light_bright_raw(want[3], 1);
-    usleep(diag_probe_ms * 1000);
-
-    /* Step 2: two-stage scan across candidate setSMLConfiguration modes (skipping 5=bright, 8=dim, 9=drive_mode) */
-    static const int cand_modes[] = {1, 2, 3, 4, 6, 7, 10};
-    int nmodes = (int)(sizeof cand_modes / sizeof cand_modes[0]);
-    for (int mi = 0; mi < nmodes && !stop_flag && !aborted; mi++) {
-        int m = cand_modes[mi];
-        char req[64];
-        if (diag_read_req(req, sizeof req) && !strncmp(req, "probe stop", 10)) { aborted = 1; break; }
-
-        diag_len = 0; diag_buf[0] = 0;
-        dkv("probe_step", "mode %d", m);
-        diag_format_items(found, nfound, items, sizeof items);
-        if (items[0]) dkv("items", "%s", items);
-        diag_flush("probing");
-
-        int rgb_moved = 0;
-        for (int d = 1; d <= 2 && !stop_flag; d++) {
-            light_config(m, d, 1);
-            usleep(diag_probe_ms * 1000);
-            if (read_lamp(l) && lamp_fresh) {
-                probe_log(rep, rcap, &rlen, "mode=%d data=%d -> rgb=%d,%d,%d (0x%04X,0x%04X,0x%04X) br=%d dim=%d dm=%d\n",
-                          m, d, l[0], l[1], l[2], l[0] & 0xffff, l[1] & 0xffff, l[2] & 0xffff, l[3], l[5], l[4]);
-                if (l[0] != want[0] || l[1] != want[1] || l[2] != want[2]) {
-                    rgb_moved = 1;
-                    int dup = 0;
-                    for (int k = 0; k < nfound; k++)
-                        if (found[k][0] == l[0] && found[k][1] == l[1] && found[k][2] == l[2]) { dup = 1; break; }
-                    if (!dup && nfound < 64) {
-                        found[nfound][0] = l[0]; found[nfound][1] = l[1]; found[nfound][2] = l[2];
-                        found[nfound][3] = l[3]; found[nfound][4] = l[5]; found[nfound][5] = l[4];
-                        nfound++;
-                        char src[32]; snprintf(src, sizeof src, "probe_m%d_d%d", m, d);
-                        append_captured_color(l[0], l[1], l[2], l[3], l[5], l[4], src, last_usb, sizeof last_usb);
-                    }
-                }
-            }
-        }
-        if (rgb_moved) {
-            for (int d = 0; d <= 20 && !stop_flag; d++) {
-                if (d == 1 || d == 2) continue;
-                if (diag_read_req(req, sizeof req) && !strncmp(req, "probe stop", 10)) { aborted = 1; break; }
-                light_config(m, d, 1);
-                usleep(diag_probe_ms * 1000);
-                if (read_lamp(l) && lamp_fresh) {
-                    probe_log(rep, rcap, &rlen, "mode=%d data=%d -> rgb=%d,%d,%d (0x%04X,0x%04X,0x%04X) br=%d dim=%d dm=%d\n",
-                              m, d, l[0], l[1], l[2], l[0] & 0xffff, l[1] & 0xffff, l[2] & 0xffff, l[3], l[5], l[4]);
-                    if (l[0] != want[0] || l[1] != want[1] || l[2] != want[2]) {
-                        int dup = 0;
-                        for (int k = 0; k < nfound; k++)
-                            if (found[k][0] == l[0] && found[k][1] == l[1] && found[k][2] == l[2]) { dup = 1; break; }
-                        if (!dup && nfound < 64) {
-                            found[nfound][0] = l[0]; found[nfound][1] = l[1]; found[nfound][2] = l[2];
-                            found[nfound][3] = l[3]; found[nfound][4] = l[5]; found[nfound][5] = l[4];
-                            nfound++;
-                            char src[32]; snprintf(src, sizeof src, "probe_m%d_d%d", m, d);
-                            append_captured_color(l[0], l[1], l[2], l[3], l[5], l[4], src, last_usb, sizeof last_usb);
-                        }
-                    }
-                }
-            }
-        }
-        light_rgb(want[0], want[1], want[2], 1);
-        light_bright_raw(want[3], 1);
-    }
-
-    /* Step 3: restore exact baseline state */
-    if (want[5] >= 1) light_config(8, want[5], 1);
-    light_config(9, 1, 1);
-    light_rgb(want[0], want[1], want[2], 1);
-    light_bright_raw(want[3], 1);
-    if (want[4] == 2) light_config(9, 2, 1);
-    usleep(diag_probe_ms * 1000);
-    int restored = read_lamp(l) && lamp_fresh && l[3] == want[3]
-        && (want[4] == 2 ? l[4] == 2 : (l[0] == want[0] && l[1] == want[1] && l[2] == want[2]));
-    base.r = want[0]; base.g = want[1]; base.b = want[2];
-    base.bright_raw = want[3]; base.drive_mode = want[4]; base.dim = want[5]; base.valid = 1;
-    saved_write(0);
-    base.valid = 0;
-    last_rgb[0] = last_rgb[1] = last_rgb[2] = -1; last_raw = -1;
-
-    probe_log(rep, rcap, &rlen, "\nSummary: found=%d aborted=%d restored=%d\n", nfound, aborted, restored);
-
-    char usb_rep[200] = "none", path[400], fname[64];
-    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
-    strftime(fname, sizeof fname, "micom-preset-probe-%Y%m%d-%H%M.txt", &tm);
-    mkdir(report_dir, 0755); chmod(report_dir, 0755);
-    snprintf(path, sizeof path, "%s/micom-preset-probe.txt", report_dir);
-    if (rep) {
-        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
-        if (fd >= 0) { fchmod(fd, 0644); (void)write(fd, rep, rlen); fsync(fd); close(fd); }
-        const char *stick = find_stick();
-        if (stick) {
-            char d[300]; snprintf(d, sizeof d, "%s/Light Vibes reports", stick);
-            mkdir(d, 0777);
-            snprintf(path, sizeof path, "%s/%s", d, fname);
-            fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
-            if (fd >= 0) {
-                fchmod(fd, 0644);
-                if (write(fd, rep, rlen) == (ssize_t)rlen && !fsync(fd)) {
-                    snprintf(usb_rep, sizeof usb_rep, "%.60s/Light Vibes reports/%s", stick, fname);
-                    sync();
-                }
-                close(fd);
-            }
-        }
-        free(rep);
-    }
-
-    diag_len = 0; diag_buf[0] = 0;
-    dkv("reply", "1");
-    dkv("found", "%d", nfound);
-    dkv("restored", "%d", restored);
-    dkv("usb", "%s", usb_rep);
-    diag_format_items(found, nfound, items, sizeof items);
-    if (items[0]) dkv("items", "%s", items);
-    diag_flush("probe_done");
-    say("MICOM preset probe done: found %d color(s), restored %d, USB %s", nfound, restored, usb_rep);
-}
-
 static void diag_dispatch(void) {
     while (diag_pending && !stop_flag) {
         int op = diag_pending;
         if (op == DIAG_TEST) diag_run();
         else if (op == DIAG_SNAP) diag_snap();
         else if (op == DIAG_WATCH) diag_watch();
-        else if (op == DIAG_PROBE) diag_probe();
         else diag_pending = 0;
     }
 }
 
-/* 1 when a lamp test/snap/watch/probe is waiting. A save or tuning capture is handled in-place without breaking audio capture. */
+/* 1 when a lamp test/snap/watch is waiting. A save or tuning capture is handled in-place without breaking audio capture. */
 static int diag_poll(void) {
     if (diag_pending) return 1;
     char req[64];
@@ -2797,8 +2613,6 @@ static int diag_poll(void) {
     if (!strncmp(req, "snap", 4)) { diag_pending = DIAG_SNAP; return 1; }
     if (!strncmp(req, "watch stop", 10)) return 0;
     if (!strncmp(req, "watch", 5)) { diag_pending = DIAG_WATCH; return 1; }
-    if (!strncmp(req, "probe stop", 10)) return 0;
-    if (!strncmp(req, "probe", 5)) { diag_pending = DIAG_PROBE; return 1; }
     if (!strncmp(req, "save", 4)) diag_save(req);
     else if (!strncmp(req, "capture", 7)) {
         if (strstr(req + 7, "stop")) {

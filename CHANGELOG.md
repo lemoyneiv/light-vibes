@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.9
+
+- Removed the experimental **Probe presets** (`setSMLConfiguration` mode scan) from **LED testing & color capture** after on-car Hyundai Ioniq 5 testing showed undocumented MICOM configuration modes do not switch stock mood themes and can lock out SML lamp writes until head-unit reboot. Read-only **Capture current**, 1 Hz **Auto-capture**, and the **15-second LED & brightness test** remain unchanged.
+
 ## 0.6.8
 
 ### Authors

@@ -27,14 +27,14 @@ import java.util.Map;
 /**
  * Material Design 3 LED Testing & Color Capture page (USB-only, zero external/GitHub links):
  * - Left card: 15-second RGB & brightness hardware check with on-screen verdict and direct USB log export.
- * - Right card: Instant "Capture current color", hands-off 1 Hz "Auto-capture" (for stock themes & Drive Modes),
- *   and experimental MICOM setSMLConfiguration preset probe, all saving directly to USB "Light Vibes reports/".
+ * - Right card: Instant "Capture current color" and hands-off 1 Hz "Auto-capture" (for stock themes & Drive Modes),
+ *   saving directly to USB "Light Vibes reports/".
  */
 final class ReportPage extends LinearLayout {
     private static final int START_TIMEOUT_MS = 12000, TEST_TIMEOUT_MS = 60000, SAVE_WAIT_MS = 8000;
-    private static final int SNAP_TIMEOUT_MS = 6000, PROBE_TIMEOUT_MS = 45000, POLL_MS = 450;
+    private static final int SNAP_TIMEOUT_MS = 6000, POLL_MS = 450;
 
-    private static final int MODE_NONE = 0, MODE_TEST = 1, MODE_SAVE = 2, MODE_SNAP = 3, MODE_WATCH = 4, MODE_PROBE = 5;
+    private static final int MODE_NONE = 0, MODE_TEST = 1, MODE_SAVE = 2, MODE_SNAP = 3, MODE_WATCH = 4;
 
     private final File diag, request, result;
     private final Runnable close;
@@ -54,8 +54,8 @@ final class ReportPage extends LinearLayout {
     private TextView[] stepRows;
     private View[] stepSwatches;
 
-    // Right card: Color capture & MICOM probe
-    private TextView snapBtn, watchBtn, probeBtn, capStatus;
+    // Right card: Color capture & 1 Hz auto-capture
+    private TextView snapBtn, watchBtn, capStatus;
     private LinearLayout capList;
     private final List<int[]> captured = new ArrayList<int[]>(); // each: {r, g, b, br, dim, dm}
 
@@ -125,7 +125,6 @@ final class ReportPage extends LinearLayout {
 
     void cancelAndStop() {
         if (activeOp == MODE_WATCH) writeRequest("watch stop");
-        else if (activeOp == MODE_PROBE) writeRequest("probe stop");
         activeOp = MODE_NONE;
         stop();
     }
@@ -176,7 +175,7 @@ final class ReportPage extends LinearLayout {
         t.setBackgroundDrawable(Widgets.shape(fill, stroke, stroke != 0 ? dp(1) : 0, dp(20)));
     }
 
-    // ---------- Right Card: Color Capture, Auto-Capture & MICOM Preset Probe ----------
+    // ---------- Right Card: Color Capture & 1 Hz Auto-Capture ----------
 
     private LinearLayout buildCaptureCard(Context c) {
         LinearLayout card = new LinearLayout(c);
@@ -188,7 +187,7 @@ final class ReportPage extends LinearLayout {
         h.setTypeface(Typeface.DEFAULT_BOLD);
         card.addView(h);
 
-        TextView desc = text("Read the lamp's live 16-bit RGB, auto-log colors while tapping swatches in the car's Ambient Light menu (or cycling Drive Modes), or probe MICOM preset modes.", 12f, MUTED);
+        TextView desc = text("Read the lamp's live 16-bit RGB immediately, or start 1 Hz auto-capture while tapping swatches in the car's Ambient Light menu or cycling Drive Modes.", 12f, MUTED);
         desc.setPadding(0, dp(2), 0, dp(10));
         card.addView(desc);
 
@@ -206,13 +205,6 @@ final class ReportPage extends LinearLayout {
         LayoutParams wp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38));
         wp.leftMargin = dp(8);
         btnRow.addView(watchBtn, wp);
-
-        probeBtn = pill("Probe presets", 2, 13.5f, new OnClickListener() {
-            @Override public void onClick(View v) { toggleProbe(); }
-        });
-        LayoutParams pp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38));
-        pp.leftMargin = dp(8);
-        btnRow.addView(probeBtn, pp);
 
         card.addView(btnRow);
 
@@ -238,20 +230,15 @@ final class ReportPage extends LinearLayout {
             watchBtn.setText(w ? "Stop auto-capture" : "Auto-capture");
             stylePill(watchBtn, w ? 3 : 0);
         }
-        if (probeBtn != null) {
-            boolean p = activeOp == MODE_PROBE;
-            probeBtn.setText(p ? "Stop probe" : "Probe presets");
-            stylePill(probeBtn, p ? 3 : 2);
-        }
         boolean busyOther = activeOp == MODE_TEST || activeOp == MODE_SAVE || activeOp == MODE_SNAP;
         if (snapBtn != null) {
-            snapBtn.setEnabled(!busyOther && activeOp != MODE_PROBE);
+            snapBtn.setEnabled(!busyOther);
             snapBtn.setAlpha(snapBtn.isEnabled() ? 1f : 0.45f);
         }
     }
 
     private void startSnap() {
-        if (activeOp == MODE_TEST || activeOp == MODE_SAVE || activeOp == MODE_PROBE) return;
+        if (activeOp == MODE_TEST || activeOp == MODE_SAVE) return;
         diag.mkdirs();
         result.delete();
         activeOp = MODE_SNAP;
@@ -264,7 +251,7 @@ final class ReportPage extends LinearLayout {
     }
 
     private void toggleWatch() {
-        if (activeOp == MODE_TEST || activeOp == MODE_SAVE || activeOp == MODE_PROBE) return;
+        if (activeOp == MODE_TEST || activeOp == MODE_SAVE) return;
         if (activeOp == MODE_WATCH) {
             writeRequest("watch stop");
             activeOp = MODE_NONE;
@@ -282,25 +269,6 @@ final class ReportPage extends LinearLayout {
         capStatus.setTextColor(ACCENT);
         syncCaptureButtons();
         writeRequest("watch");
-        startPolling();
-    }
-
-    private void toggleProbe() {
-        if (activeOp == MODE_TEST || activeOp == MODE_SAVE) return;
-        if (activeOp == MODE_PROBE) {
-            writeRequest("probe stop");
-            capStatus.setText("Stopping probe and restoring your ambient color…");
-            return;
-        }
-        if (activeOp == MODE_WATCH) writeRequest("watch stop");
-        diag.mkdirs();
-        result.delete();
-        activeOp = MODE_PROBE;
-        startedAt = System.currentTimeMillis();
-        capStatus.setText("Probing MICOM setSMLConfiguration modes (restores your color afterward)…");
-        capStatus.setTextColor(ACCENT);
-        syncCaptureButtons();
-        writeRequest("probe");
         startPolling();
     }
 
@@ -392,7 +360,6 @@ final class ReportPage extends LinearLayout {
 
     private void startTest() {
         if (activeOp == MODE_WATCH) writeRequest("watch stop");
-        else if (activeOp == MODE_PROBE) return;
         diag.mkdirs();
         result.delete();
         testMap = new HashMap<String, String>();
@@ -720,31 +687,6 @@ final class ReportPage extends LinearLayout {
                 }
             }
             return;
-        }
-
-        if (activeOp == MODE_PROBE) {
-            if ("probing".equals(stage)) {
-                String step = m.get("probe_step") != null ? m.get("probe_step") : "scanning";
-                mergeItemsString(m.get("items"));
-                refreshCapturedList();
-                capStatus.setText("Probing MICOM " + step + "… (your color will restore when finished)");
-                capStatus.setTextColor(ACCENT);
-            } else if ("probe_done".equals(stage)) {
-                activeOp = MODE_NONE;
-                polling = false;
-                syncCaptureButtons();
-                mergeItemsString(m.get("items"));
-                refreshCapturedList();
-                String found = m.get("found") != null ? m.get("found") : "0";
-                capStatus.setText("Probe complete: " + found + " distinct preset color(s) found · " + usbShort(m.get("usb")));
-                capStatus.setTextColor(ACCENT);
-            } else if (waited > PROBE_TIMEOUT_MS) {
-                activeOp = MODE_NONE;
-                polling = false;
-                syncCaptureButtons();
-                capStatus.setText("Probe timed out waiting for service");
-                capStatus.setTextColor(MUTED);
-            }
         }
     }
 }
