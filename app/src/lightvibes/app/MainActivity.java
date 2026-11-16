@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
     private boolean tuneActive;
     private long tuneRequestedAt;
     private ReportPage reportPage;  // on screen instead of the editor while set
-    private FeedbackPage feedbackPage;  // likewise
+    private ScrollView rightScroll;
 
     private LinearLayout presetList, presetActions, editorTop, editor;
     private MeterView meter;
@@ -289,7 +289,7 @@ public class MainActivity extends Activity {
         super.onResume();
         // the settings files are the truth: they may have changed while this screen was away (another copy of it,
         // loadpreset.sh, a restart), so show what's there now rather than what was loaded earlier
-        if (reportPage == null && feedbackPage == null) {
+        if (reportPage == null) {
             loadCurrent();
             refreshPresets();
             refreshEditor();
@@ -661,7 +661,7 @@ public class MainActivity extends Activity {
         editorTop = new LinearLayout(this);     // stays pinned while settings below scroll
         editorTop.setOrientation(LinearLayout.VERTICAL);
         right.addView(editorTop);
-        ScrollView rightScroll = new ScrollView(this);
+        rightScroll = new ScrollView(this);
         rightScroll.setVerticalScrollBarEnabled(false);
         editor = new LinearLayout(this);
         editor.setOrientation(LinearLayout.VERTICAL);
@@ -915,19 +915,11 @@ public class MainActivity extends Activity {
         head.setPadding(0, 0, 0, dp(10));
         card.addView(head);
 
-        card.addView(menuItemRow("Test lights / Report a problem",
-                "Run a 15s RGB & brightness lamp check or export a QR diagnostic report", new View.OnClickListener() {
+        card.addView(menuItemRow("LED testing & color capture",
+                "Test RGB & brightness, capture stock/drive-mode colors, or save USB logs", new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         dlg.dismiss();
                         openReport();
-                    }
-                }));
-
-        card.addView(menuItemRow("Send feedback",
-                "Share ideas or feature requests via a phone QR code", new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        dlg.dismiss();
-                        openFeedback();
                     }
                 }));
 
@@ -962,15 +954,19 @@ public class MainActivity extends Activity {
         }
 
         LinearLayout foot = new LinearLayout(this);
-        foot.setGravity(Gravity.RIGHT);
+        foot.setGravity(Gravity.CENTER_VERTICAL);
         foot.setPadding(0, dp(10), 0, 0);
+        TextView credit = text("Light Vibes v0.6.8 · Kyle (dibble9012) & lemoyneiv", 11.5f, MUTED);
+        credit.setSingleLine(true);
+        credit.setEllipsize(TextUtils.TruncateAt.END);
+        foot.addView(credit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         TextView close = pillButton("Close", 2, 14.5f, new View.OnClickListener() {
             @Override public void onClick(View v) { dlg.dismiss(); }
         });
         foot.addView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
         card.addView(foot);
 
-        dlg.setContentView(card, new ViewGroup.LayoutParams(dp(460), ViewGroup.LayoutParams.WRAP_CONTENT));
+        dlg.setContentView(card, new ViewGroup.LayoutParams(dp(480), ViewGroup.LayoutParams.WRAP_CONTENT));
         dlg.show();
     }
 
@@ -1011,30 +1007,19 @@ public class MainActivity extends Activity {
         return m;
     }
 
-    private void openFeedback() {
-        if (feedbackPage != null) return;
-        if (reportPage != null) { reportPage.stop(); reportPage = null; }
-        feedbackPage = new FeedbackPage(this, mode(), new Runnable() {
-            @Override public void run() { closeReport(); }
-        });
-        refreshEditor();
-    }
-
     private void openReport() {
         if (reportPage != null) return;
-        feedbackPage = null;
         reportPage = new ReportPage(this, getFilesDir(), new Runnable() {
             @Override public void run() { closeReport(); }
         });
         refreshEditor();
     }
 
-    /** Back to the settings from Report a problem or Feedback. */
+    /** Back to the settings from LED testing & color capture. */
     private void closeReport() {
-        if (reportPage == null && feedbackPage == null) return;
-        if (reportPage != null) reportPage.stop();
+        if (reportPage == null) return;
+        reportPage.cancelAndStop();
         reportPage = null;
-        feedbackPage = null;
         refreshEditor();
     }
 
@@ -1043,11 +1028,16 @@ public class MainActivity extends Activity {
         editorTop.removeAllViews();
         tuneButton = null;
         tuneStatus = null;
-        if (reportPage != null || feedbackPage != null) {
+        if (reportPage != null) {
             speedNow = null;
-            editor.addView(reportPage != null ? reportPage : feedbackPage);
+            rightScroll.setVisibility(View.GONE);
+            editorTop.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            editorTop.addView(reportPage, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            syncMeter();
             return;
         }
+        rightScroll.setVisibility(View.VISIBLE);
+        editorTop.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         editorTop.addView(topBar());
         String mode = mode();
         speedNow = null;

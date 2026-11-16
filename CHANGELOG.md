@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.8
+
+### Authors
+- Co-authored by **Kyle ([dibble9012](https://github.com/dibble9012))** and **[lemoyneiv](https://github.com/lemoyneiv)**.
+
+### Material Design 3 interface & presets
+- Full **Material Design 3** split-pane UI tailored for wide 1280×480 Gen5W screens in both Day and Night themes, replacing the tall mode button grid with a compact single-row header, categorized **Mode** sheet, segmented tabs, and M3 Expressive sliders.
+- **Synesthesia** is now the default preset, alongside **Phase Pulse**, **Phase Drift**, **Duet** (with beat-synced pair walk), **Ember** (with snare/clap spark re-ignition), **Night Drive** (EV power/regen or speed colour + music beat brightness), **Lively**, **Bold Flash**, **Epic**, **Glow**, **Speed**, **Power** and **Efficiency**.
+
+### Hyundai Ioniq 5 & stock `0x01xx` mood palette
+- Added all 10 official Hyundai `0x01xx` mood-theme stock colours—including Healing Forest emerald green, Mindful Teal, Ocean Blue, Marigold Gold, Vivid Orchid and Dream Purple—tested live on the Hyundai Ioniq 5.
+- Added 3-band Auto-BPM tempo tracking with CarPlay track-skip silence reset and RAM-buffered 20-second USB audio/CSV tuning captures (`Light Vibes tuning/`).
+
+### USB-only LED testing & color capture
+- Removed the **Send feedback** screen and all external/GitHub QR code links.
+- Redesigned **LED testing & color capture** (`⋮ > LED testing & color capture`) as a two-card USB-only tool:
+  - **15-second LED & brightness test** with live step tracking, on-screen diagnosis, and direct **Save to USB** (`Light Vibes reports/`).
+  - **Capture current**, **Auto-capture** (1 Hz background watcher while tapping colours in the car's Ambient Light settings or cycling Drive Modes), and **Probe presets** (`setSMLConfiguration` preset scan with automatic baseline restoration), logging full 16-bit RGB + hex values to `Light Vibes reports/captured-colors.txt`.
+
 ## 0.6.0
 
 ### New cars

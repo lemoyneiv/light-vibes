@@ -91,7 +91,7 @@ if [ "${1:-}" = test ]; then
     fi
     build/test_lamp
     mkdir -p build/rt
-    javac --release 8 -nowarn -Xlint:-options -d build/rt app/src/lightvibes/app/QrCode.java app/src/lightvibes/app/Report.java test/ReportTest.java
+    javac --release 8 -nowarn -Xlint:-options -d build/rt app/src/lightvibes/app/Report.java test/ReportTest.java
     java -cp build/rt lightvibes.app.ReportTest
     [ -f build/song.raw ] || python3 test/make_test_audio.py build/song.raw
     beats=$(build/lightvibesd-host --analyze build/song.raw | grep -c BEAT || true)

@@ -6,7 +6,7 @@ stops, or Siri or a phone call comes in, your own colour and brightness come bac
 
 What's new in each version is in the [changelog](CHANGELOG.md).
 
-**[Download the latest release](https://github.com/dibble9012/light-vibes/releases/latest)**
+**[Download the latest release](https://github.com/lemoyneiv/light-vibes/releases/latest)**
 
 Supports the Kia EV6, Hyundai Ioniq 5 and Hyundai Ioniq 6 (USA Gen5W head units). Light Vibes detects
 the car and uses its own factory ambient colours (64 custom wheel colours on Kia; 64 custom wheel colours plus all 10 official `0x01xx` mood-theme stock colours—including Healing Forest emerald green, Mindful Teal, Ocean Blue, Marigold Gold, Vivid Orchid and Dream Purple—on Hyundai).
@@ -15,15 +15,15 @@ the car and uses its own factory ambient colours (64 custom wheel colours on Kia
 
 You need HMG-API 1.0.0 or later on the car first. Both methods use a USB flash drive. Download
 the file for your method from the
-[latest release](https://github.com/dibble9012/light-vibes/releases/latest), listed under **Assets**.
+[latest release](https://github.com/lemoyneiv/light-vibes/releases/latest), listed under **Assets**.
 
 ADB over USB has to be off, or the port can't read the drive.
 
 ### With the HMG-API app
 
-1. Download `light-vibes-v0.6.7-hmgapi-usb.zip`.
+1. Download `light-vibes-v0.6.8-hmgapi-usb.zip`.
 2. Unzip it onto the top level of a FAT32 flash drive, so the drive has
-   `HMGAPI/updates/light-vibes-v0.6.7.zip`.
+   `HMGAPI/updates/light-vibes-v0.6.8.zip`.
 3. Plug the drive into the car and install the mod from the updates page in the HMG-API app.
 4. Tap **Apply changes** in the app, then **Restart unit**. The Light Vibes tile appears on the
    home screen after the restart.
@@ -32,7 +32,7 @@ To remove the mod, use the HMG-API app.
 
 ### With NEMESIS
 
-1. Download `light-vibes-v0.6.7-nemesis-usb.zip`.
+1. Download `light-vibes-v0.6.8-nemesis-usb.zip`.
 2. Unzip it onto the top level of a FAT32 or exFAT flash drive, so the drive has `NEMESIS.data`
    and the `packages` folder at its top level. Keep only one NEMESIS package on the drive.
 3. Once Android is up, plug the drive into the car and confirm the install of "Light Vibes".
@@ -52,7 +52,7 @@ Every change applies right away.
 
 The Material Design 3 split-pane interface adapts automatically to the head unit's Day and Night themes and fits the wide 1280×480 Gen5W screen without vertical clutter:
 
-- **Master switch** at the top of the left preset rail switches the effect on or off without uninstalling the mod, alongside **+** (new preset) and **⋮** (lamp diagnostics, feedback, and preset reset/restore).
+- **Master switch** at the top of the left preset rail switches the effect on or off without uninstalling the mod, alongside **+** (new preset) and **⋮** (LED testing & color capture, and preset reset/restore).
 - **Presets:** Synesthesia (the default), Phase Pulse, Phase Drift, Duet, Ember, Night Drive, Lively,
   Bold Flash, Epic, Glow, Speed, Power and Efficiency—each with a live color badge. Tap one to use it. If you switch presets
   with unsaved changes, the app asks whether to save them, save them as a new preset, or discard them.
@@ -144,9 +144,10 @@ microphone hearing the speakers, and the mod doesn't use the microphone.
 
 ## What's been tested
 
-Tried on the car (EV6):
+Tried on the car (Kia EV6 & Hyundai Ioniq 5):
 
-- CarPlay music, Spectrum, Beat and Pulse, presets and colours, and the live meter
+- CarPlay music across Synesthesia, Phase Pulse, Phase Drift, Duet, Ember, Night Drive, Spectrum, Beat and Pulse, presets and colours, and the live meter
+- Hyundai Ioniq 5 custom 64-colour wheel plus all 10 official `0x01xx` mood-theme stock colours, USB diagnostic report exports, and 20-second USB audio/CSV tuning captures
 - Speed and Power while driving, and Efficiency's car average (it matches the cluster)
 - Pulse's Drive Mode and Set as ambient light color, and putting your settings back when Light Vibes stops
 - Sounds of Nature
@@ -154,31 +155,18 @@ Tried on the car (EV6):
 
 Not tried on the car yet:
 
-- **Bringing your colour back** after the car is switched off mid-song. The logic has only been
-  tested off the car.
-- **CarPlay since the 44.1 kHz change** that added the head unit's own audio.
-- **The Hyundai Ioniq 5 and Ioniq 6.** Their colour palette and the NEMESIS launch come from
-  [lemoyneiv](https://github.com/lemoyneiv)'s work. Everything else has been tried on the EV6 only.
+- **Bringing your colour back** after the car is switched off mid-song. The logic has been tested off the car.
+- **Hyundai Ioniq 6** on-vehicle verification (shares the Gen5W Hyundai palette and NEMESIS launch).
 - **Efficiency on the current trip** over a long drive.
-- **Report a problem** saving to a USB stick.
 
-## Ideas and requests
+## LED testing & color capture
 
-Tap **Feedback** at the top of the app and scan the code with your phone. It opens a GitHub issue for
-your idea, already tagged as an enhancement.
+Open **⋮ > LED testing & color capture** at the top of the left preset rail while parked. Everything runs locally and saves directly to a USB stick in `Light Vibes reports/` (with no QR codes or external links):
 
-## If something isn't working
-
-Open **Report a problem** at the top of the app, while parked. For about 15 seconds the light changes
-colour and brightness while you watch, with each command listed as it's sent, then your own settings
-come back. **Test again** runs it once more. The app says what it found and shows
-a code. Scan it with your phone to open a filled-in [GitHub issue](https://github.com/dibble9012/light-vibes/issues/new?template=problem.yml),
-add your car, and submit it.
-
-The code holds the versions of Light Vibes and HMG-API, the head unit's software version, your other mods, the
-lamp's answers, your light settings and how loud the music has been. It doesn't include your serial number, addresses or
-location, and nothing is sent unless you submit it. With a USB stick plugged in, the app also saves the full report
-in a `Light Vibes reports` folder that you can attach. Over ADB it's at `/data/hmgapi/public/light-vibes/report.txt`.
+- **15-second LED & brightness test:** cycles Red, Green and Blue, then Low (`1`), High (`10`) and Mid (`5`) brightness while listing each step live, restores your own ambient colour and brightness, shows an on-screen diagnosis, and saves `light-vibes-report-YYYYMMDD-HHMM.txt` to USB (also kept locally at `/data/hmgapi/public/light-vibes/report.txt`).
+- **Capture current:** reads the lamp's live 16-bit RGB (`0x01xx` stock or wheel), brightness, Dimmed-in-Dark and Drive Mode link in ~0.4 s, displays a live swatch on screen, and appends a timestamped line to `Light Vibes reports/captured-colors.txt` on USB.
+- **Auto-capture:** polls `SYS_SML_STATUS_M_RESP` at 1 Hz in the background so you can switch to the car's native **Ambient Light** menu and tap through stock swatches—or cycle **Eco / Normal / Sport** Drive Modes—and automatically log every unique colour to `captured-colors.txt` on USB.
+- **Probe presets:** runs a safe two-stage scan of `com.hkmc.micom.system` `setSMLConfiguration(mode, data)` (checking Drive Mode link `mode=9, data=2` and candidate preset modes), writes `micom-preset-probe-YYYYMMDD-HHMM.txt` plus any discovered colours to `captured-colors.txt` on USB, and restores your exact baseline colour and brightness afterward.
 
 ## How it works
 
@@ -193,7 +181,7 @@ in a `Light Vibes reports` folder that you can attach. Over ADB it's at `/data/h
 - **Lamp control** (`service call com.hkmc.micom.system`, `com.hkmc.micom.ISystemService`):
   `76` requestSMLStatus, `77` setSMLConfiguration(mode, data) with mode 5 for brightness and mode 9 for
   drive-mode-linked colour, and `78` setSMLRGB(byte[2] r, byte[2] g, byte[2] b). The lamp only reliably
-  accepts its factory 64-colour custom wheel, which differs between Kia and Hyundai (`VehicleSettings.apk`);
+  accepts its factory 64-colour custom wheel (plus `0x01xx` stock mood colours on Hyundai), which differs between Kia and Hyundai (`VehicleSettings.apk`);
   both `lightvibesd` and the app auto-detect the vehicle palette (`kia` or `hyundai`, overridable via a
   `palette` setting file). Custom colours are ignored while drive-mode colour is on, so the service turns
   it off while it drives the lamp and restores it afterwards. Commands go through a persistent helper
@@ -221,8 +209,8 @@ package. tinyalsa is cloned into `third_party/` at a pinned commit.
 HMGAPI_DIR=../HMG-API ./build.sh
 ```
 
-This writes the two release files to `dist/`, along with `light-vibes-v0.6.0.hmgapi.zip`, the signed
-mod inside them, and `light-vibes-v0.6.0-nemesis-package.zip`, the file to upload to the NEMESIS
+This writes the two release files to `dist/`, along with `light-vibes-v0.6.8.hmgapi.zip`, the signed
+mod inside them, and `light-vibes-v0.6.8-nemesis-package.zip`, the file to upload to the NEMESIS
 Package Store. It signs the mod with `~/.hmgapi/author.key` and the app with
 `~/.hmgapi/light-vibes-app.keystore`, which it makes on the first build. Updates must be signed with
 the same keys as the first install.
@@ -233,8 +221,13 @@ the same keys as the first install.
 HMGAPI_DIR=../HMG-API ./build.sh test
 ```
 
-This also runs the analysis on synthetic music on the Mac (it needs numpy), and `test/test_lamp.c`,
-which checks the speed fade, the vehicle service's replies and the saved colour off the car.
+This also runs the analysis on synthetic music on the host (it needs numpy), and `test/test_lamp.c`,
+which checks the speed fade, the vehicle service's replies, the saved colour, and USB diagnostic/color capture off the car.
+
+## Authors
+
+- **Kyle ([dibble9012](https://github.com/dibble9012))**
+- **[lemoyneiv](https://github.com/lemoyneiv)**
 
 ## License
 
